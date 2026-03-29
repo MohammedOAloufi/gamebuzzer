@@ -13,13 +13,13 @@ import {
 
 // ضع بيانات مشروعك من Firebase هنا
 const firebaseConfig = {
-  apiKey: "Api_Key",
-  authDomain: "Auth_Domain",
-  databaseURL: "Data_BaseURL",
-  projectId: "Project_Id",
-  storageBucket: "Storage_Bucket",
-  messagingSenderId: "Messaging_SenderId",
-  appId: "App_Id",
+  apiKey: "AIzaSy...",
+  authDomain: "gamebuzzuer.firebaseapp.com",
+  databaseURL: "https://gamebuzzuer-default-rtdb.firebaseio.com",
+  projectId: "gamebuzzuer",
+  storageBucket: "gamebuzzuer.firebasestorage.app",
+  messagingSenderId: "952611711946",
+  appId: "1:952611711946:web:881006b2fa17693307bd33",
 };
 
 const app = initializeApp(firebaseConfig);

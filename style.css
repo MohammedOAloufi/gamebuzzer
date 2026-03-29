@@ -670,3 +670,11 @@ select {
     font-size: 28px;
   }
 }
+
+.big-buzz {
+  background: #ef4444; /* أحمر */
+}
+
+.big-buzz.active {
+  background: #22c55e; /* أخضر */
+}

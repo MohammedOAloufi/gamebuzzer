@@ -15,7 +15,8 @@ import {
 const firebaseConfig = {
   apiKey: "AIzaSyBMY5kBb_UIV8jpDM2Pj8cm-3aKg78VnC0",
   authDomain: "gamebuzzuer.firebaseapp.com",
-  databaseURL: "https://gamebuzzuer-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL:
+    "https://gamebuzzuer-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "gamebuzzuer",
   storageBucket: "gamebuzzuer.firebasestorage.app",
   messagingSenderId: "952611711946",
@@ -175,6 +176,8 @@ function normalizeSession(raw, code) {
     roundEndsAt: raw?.roundEndsAt ?? null,
     hostUpdatedAt: raw?.hostUpdatedAt ?? null,
     teams,
+    cooldown: raw?.cooldown || 3,
+    cooldownEndsAt: raw?.cooldownEndsAt || null,
   };
 }
 
@@ -217,7 +220,12 @@ function renderSession(session) {
   els.toggleLockBtn.textContent = session.locked
     ? "فتح الأزرار"
     : "قفل الأزرار";
-  els.deviceStateText.textContent = session.locked ? "مقفول" : "جاهز";
+  els.deviceStateText.textContent = session.locked ? "مقفل" : "جاهز";
+  if (session.winnerTeamId) {
+    els.deviceBuzzBtn.style.background = "#22c55e"; // أخضر
+  } else {
+    els.deviceBuzzBtn.style.background = "#ef4444"; // أحمر
+  }
 
   renderWinner(session);
   renderHostBuzzButtons(session);
@@ -388,14 +396,19 @@ async function updateSessionPatch(patch) {
 
 async function startRound() {
   const session = await readCurrentSession();
+
+  const selectedTime = Number(document.getElementById("timeSelector").value);
+  const cooldown = Number(document.getElementById("cooldownSelector").value);
+
   await updateSessionPatch({
     locked: false,
     timerRunning: true,
-    timeLeft: session.maxTime || 20,
+    timeLeft: selectedTime,
+    maxTime: selectedTime,
+    cooldown,
     winnerTeamId: null,
     roundStartedAt: Date.now(),
-    roundEndsAt: Date.now() + (session.maxTime || 20) * 1000,
-    hostUpdatedAt: Date.now(),
+    roundEndsAt: Date.now() + selectedTime * 1000,
   });
 }
 
@@ -449,22 +462,29 @@ async function clearWinner() {
 
 async function claimBuzz(teamId) {
   if (!local.currentSessionCode) return;
+
   const sRef = sessionRef(local.currentSessionCode);
+
   const result = await runTransaction(sRef, (current) => {
     if (!current) return current;
+
     const safe = normalizeSession(current, local.currentSessionCode);
-    if (safe.locked || safe.winnerTeamId !== null || safe.timeLeft <= 0) {
+
+    if (
+      safe.locked ||
+      safe.winnerTeamId !== null ||
+      safe.timeLeft <= 0 ||
+      (safe.cooldownEndsAt && Date.now() < safe.cooldownEndsAt)
+    ) {
       return current;
     }
+
     return {
       ...current,
       winnerTeamId: teamId,
       locked: true,
       timerRunning: false,
-      roundEndsAt: null,
-      lastBuzzAt: Date.now(),
-      lastBuzzDeviceId: local.deviceId,
-      updatedAt: Date.now(),
+      cooldownEndsAt: Date.now() + safe.cooldown * 1000,
     };
   });
 
@@ -679,17 +699,19 @@ function bindEvents() {
   els.stopScannerBtn.addEventListener("click", stopScanner);
 }
 
-async function boot() {
+function boot() {
   bindEvents();
   startTickWorker();
 
   const queryCode = new URLSearchParams(location.search).get("session");
+
   if (queryCode) {
+    document.querySelector('[data-tab="host"]').style.display = "none";
     switchTab("device");
     els.joinCodeInput.value = queryCode.toUpperCase();
-    await joinByCode();
+    joinByCode();
   } else {
-    await createOrLoadSession(randomCode());
+    createOrLoadSession(randomCode());
   }
 }
 

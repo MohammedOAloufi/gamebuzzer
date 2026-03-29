@@ -1,231 +1,314 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css" />
 
-   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-   <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 
-  <title>Game Buzzer Realtime</title>
-
-</head>
-<body>
-  <div class="container">
-    <section class="hero">
-      <div class="hero-inner">
-        <div>
-          <div class="badges">
-            <span class="badge green">واجهة جلسة ألعاب تفاعلية</span>
-            <span class="badge">Firebase Realtime Sync + QR Mobile</span>
+    <title>Game Buzzer Realtime</title>
+  </head>
+  <body>
+    <div class="container">
+      <section class="hero">
+        <div class="hero-inner">
+          <div>
+            <div class="badges">
+              <span class="badge green">واجهة جلسة ألعاب تفاعلية</span>
+              <span class="badge">Firebase Realtime Sync + QR Mobile</span>
+            </div>
+            <h1>لوحة تحكم <span>أزرار الفرق</span> أثناء اللعب</h1>
+            <p>
+              هذه النسخة فيها سنك حقيقي. إذا ضغط أي لاعب من جواله أو من أي جهاز
+              ثاني، يتم تحديث الحالة مباشرة عند المشرف وعند كل الأجهزة المرتبطة
+              بنفس الجلسة.
+            </p>
           </div>
-          <h1>لوحة تحكم <span>أزرار الفرق</span> أثناء اللعب</h1>
-          <p>
-            هذه النسخة فيها سنك حقيقي. إذا ضغط أي لاعب من جواله أو من أي جهاز ثاني، يتم تحديث الحالة مباشرة عند المشرف وعند كل الأجهزة المرتبطة بنفس الجلسة.
-          </p>
-        </div>
 
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">معلومات الجلسة</h2>
-            <p class="card-desc">مشاركة الجلسة مع اللاعبين من الجوال أو جهاز آخر</p>
-          </div>
-          <div class="card-content">
-            <div class="session-grid">
-              <div>
-                <div class="session-code-box">
-                  <div class="session-code-label">كود الجلسة</div>
-                  <div class="session-code" id="sessionCode">------</div>
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">معلومات الجلسة</h2>
+              <p class="card-desc">
+                مشاركة الجلسة مع اللاعبين من الجوال أو جهاز آخر
+              </p>
+            </div>
+            <div class="card-content">
+              <div class="session-grid">
+                <div>
+                  <div class="session-code-box">
+                    <div class="session-code-label">كود الجلسة</div>
+                    <div class="session-code" id="sessionCode">------</div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn" id="createSessionBtn">
+                      إنشاء / تحديث الجلسة
+                    </button>
+                    <button class="btn secondary" id="copyCodeBtn">
+                      نسخ الكود
+                    </button>
+                    <button class="btn outline" id="copyJoinBtn">
+                      نسخ رابط الدخول
+                    </button>
+                  </div>
                 </div>
-                <div class="actions">
-                  <button class="btn" id="createSessionBtn">إنشاء / تحديث الجلسة</button>
-                  <button class="btn secondary" id="copyCodeBtn">نسخ الكود</button>
-                  <button class="btn outline" id="copyJoinBtn">نسخ رابط الدخول</button>
-                </div>
+                <div class="qr-box"><div id="qrcode"></div></div>
               </div>
-              <div class="qr-box"><div id="qrcode"></div></div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <div class="tabs-list">
-      <button class="tab-btn active" data-tab="host">شاشة المشرف</button>
-      <button class="tab-btn" data-tab="device">شاشة اللاعب</button>
+      <div class="tabs-list">
+        <button class="tab-btn active" data-tab="host">شاشة المشرف</button>
+        <button class="tab-btn" data-tab="device">شاشة اللاعب</button>
+      </div>
+
+      <section class="tab-panel active" id="tab-host">
+        <div class="host-layout">
+          <div class="card">
+            <div class="card-header">
+              <div class="header-row">
+                <div>
+                  <h2 class="card-title">حالة الجولة</h2>
+                  <p class="card-desc">
+                    إدارة الوقت، تحديد أول فريق ضغط، وقفل الأزرار
+                  </p>
+                </div>
+                <div class="header-badges">
+                  <span class="state-badge green" id="lockStatusBadge"
+                    >الأزرار مفتوحة</span
+                  >
+                  <span class="state-badge" id="timerStatusBadge">متوقف</span>
+                </div>
+              </div>
+            </div>
+            <div class="card-content">
+              <div class="timer-grid">
+                <div>
+                  <div class="progress-head">
+                    <span>الوقت المتبقي</span>
+                    <span><span id="timeLeftText">20</span> ثانية</span>
+                  </div>
+                  <div class="progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                  </div>
+                </div>
+                <div class="timer-box">
+                  <div class="label">المؤقت</div>
+                  <div class="value" id="timerBig">20</div>
+                </div>
+              </div>
+
+              <!-- أضف داخل قسم الأزرار في المشرف -->
+              <div class="actions">
+                <div>
+                  <label for="timeSelector">وقت العداد</label>
+                  <select id="timeSelector" class="select">
+                    <option value="3">3 ثواني</option>
+                    <option value="5">5 ثواني</option>
+                    <option value="10">10 ثواني</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="cooldownSelector">مدة منع الضغط</label>
+                  <select id="cooldownSelector" class="select">
+                    <option value="3">منع 3 ثواني</option>
+                    <option value="5">منع 5 ثواني</option>
+                    <option value="10">منع 10 ثواني</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button class="btn" id="startRoundBtn">بدء الجولة</button>
+                <button class="btn secondary" id="toggleTimerBtn">
+                  تشغيل المؤقت
+                </button>
+                <button class="btn outline" id="resetRoundBtn">
+                  إعادة الجولة
+                </button>
+                <button class="btn outline" id="toggleLockBtn">
+                  قفل الأزرار
+                </button>
+                <button class="btn danger" id="clearWinnerBtn">
+                  مسح الفائز الحالي
+                </button>
+              </div>
+
+              <div class="separator"></div>
+
+              <div>
+                <div class="winner-title">الفريق الذي ضغط أولاً</div>
+                <div class="winner-empty" id="winnerEmpty">
+                  لا يوجد ضغط حتى الآن. أول فريق يضغط سيظهر هنا مباشرة.
+                </div>
+                <div class="winner-box" id="winnerBox">
+                  <div class="winner-content">
+                    <div>
+                      <div class="winner-sub">تم استلام الضغط من</div>
+                      <h3 class="winner-name" id="winnerName">-</h3>
+                    </div>
+                    <div>
+                      <button class="btn" id="addPointBtn">إضافة نقطة</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="team-buzz-grid" id="hostBuzzGrid"></div>
+            </div>
+          </div>
+
+          <div class="side-grid">
+            <div class="card">
+              <div class="card-header">
+                <h2 class="card-title">إدارة الفرق</h2>
+                <p class="card-desc">
+                  إضافة أسماء الفرق وتعديلها قبل بدء اللعبة
+                </p>
+              </div>
+              <div class="card-content">
+                <div id="teamManageList"></div>
+                <div class="team-manage-row" style="margin-top: 16px">
+                  <input
+                    class="input"
+                    id="newTeamName"
+                    placeholder="أضف فريق جديد"
+                    maxlength="40"
+                  />
+                  <button class="btn" id="addTeamBtn">إضافة</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h2 class="card-title">ربط أجهزة اللاعبين</h2>
+                <p class="card-desc">
+                  يمكن للاعبين إدخال الكود أو مسح الـ QR للانضمام لنفس الجلسة
+                </p>
+              </div>
+              <div class="card-content">
+                <div class="join-box">
+                  <div>رابط الدخول:</div>
+                  <span class="join-url" id="joinUrlText"></span>
+                </div>
+                <div class="join-box" style="margin-top: 12px">
+                  لكي يعمل المسح من الجوال، افتح الموقع برابط HTTPS ثم امسح QR
+                  أو افتح الرابط مباشرة.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-device">
+        <div class="card device-card">
+          <div class="card-header">
+            <h2 class="card-title">واجهة اللاعب على الجوال</h2>
+            <p class="card-desc">
+              مثال على الجهاز الذي يدخل بالكود أو يمسح QR وينتظر إتاحة الضغط
+            </p>
+          </div>
+          <div class="card-content">
+            <div class="device-form">
+              <div class="field">
+                <label for="deviceName">اسم الجهاز / اللاعب</label>
+                <input
+                  class="input"
+                  id="deviceName"
+                  value="جهاز لاعب 1"
+                  maxlength="40"
+                />
+              </div>
+              <div class="field">
+                <label for="selectedTeam">اختر الفريق</label>
+                <select class="select" id="selectedTeam"></select>
+              </div>
+            </div>
+
+            <div class="device-form">
+              <div class="field">
+                <label for="joinCodeInput">أدخل كود الجلسة</label>
+                <input
+                  class="input"
+                  id="joinCodeInput"
+                  placeholder="مثال: AB12CD"
+                  maxlength="10"
+                />
+              </div>
+              <div
+                class="field"
+                style="display: flex; align-items: end; gap: 10px"
+              >
+                <button class="btn" id="joinByCodeBtn" style="width: 100%">
+                  انضمام بالكود
+                </button>
+              </div>
+            </div>
+
+            <div class="connected-box">
+              <div>
+                <div class="connected-label">متصل على الجلسة</div>
+                <div class="connected-code" id="deviceSessionCode">------</div>
+              </div>
+              <span class="state-badge green" id="connectionBadge">متصل</span>
+            </div>
+
+            <button class="big-buzz" id="deviceBuzzBtn">اضغط للإجابة</button>
+
+            <div class="stats-grid">
+              <div class="stat-box">
+                <div class="stat-label">الحالة</div>
+                <div class="stat-value" id="deviceStateText">جاهز</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">المؤقت</div>
+                <div class="stat-value">
+                  <span id="deviceTimeLeft">20</span> ث
+                </div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">الفريق</div>
+                <div class="stat-value" id="deviceTeamName">-</div>
+              </div>
+            </div>
+
+            <div class="card scanner-card">
+              <div class="card-header">
+                <h3 class="card-title" style="font-size: 20px">
+                  مسح QR من الجوال
+                </h3>
+                <p class="card-desc">
+                  افتح هذا التبويب من الجوال ثم اضغط تشغيل الكاميرا وامسح الكود
+                </p>
+              </div>
+              <div class="card-content">
+                <div class="scanner-wrap">
+                  <div class="scanner-actions">
+                    <button class="btn" id="startScannerBtn">
+                      تشغيل الكاميرا
+                    </button>
+                    <button class="btn outline" id="stopScannerBtn">
+                      إيقاف الكاميرا
+                    </button>
+                  </div>
+                  <div id="reader"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
 
-    <section class="tab-panel active" id="tab-host">
-      <div class="host-layout">
-        <div class="card">
-          <div class="card-header">
-            <div class="header-row">
-              <div>
-                <h2 class="card-title">حالة الجولة</h2>
-                <p class="card-desc">إدارة الوقت، تحديد أول فريق ضغط، وقفل الأزرار</p>
-              </div>
-              <div class="header-badges">
-                <span class="state-badge green" id="lockStatusBadge">الأزرار مفتوحة</span>
-                <span class="state-badge" id="timerStatusBadge">متوقف</span>
-              </div>
-            </div>
-          </div>
-          <div class="card-content">
-            <div class="timer-grid">
-              <div>
-                <div class="progress-head">
-                  <span>الوقت المتبقي</span>
-                  <span><span id="timeLeftText">20</span> ثانية</span>
-                </div>
-                <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
-              </div>
-              <div class="timer-box">
-                <div class="label">المؤقت</div>
-                <div class="value" id="timerBig">20</div>
-              </div>
-            </div>
+    <div class="toast" id="toast"></div>
 
-            <div class="actions">
-              <button class="btn" id="startRoundBtn">بدء الجولة</button>
-              <button class="btn secondary" id="toggleTimerBtn">تشغيل المؤقت</button>
-              <button class="btn outline" id="resetRoundBtn">إعادة الجولة</button>
-              <button class="btn outline" id="toggleLockBtn">قفل الأزرار</button>
-              <button class="btn danger" id="clearWinnerBtn">مسح الفائز الحالي</button>
-            </div>
-
-            <div class="separator"></div>
-
-            <div>
-              <div class="winner-title">الفريق الذي ضغط أولاً</div>
-              <div class="winner-empty" id="winnerEmpty">لا يوجد ضغط حتى الآن. أول فريق يضغط سيظهر هنا مباشرة.</div>
-              <div class="winner-box" id="winnerBox">
-                <div class="winner-content">
-                  <div>
-                    <div class="winner-sub">تم استلام الضغط من</div>
-                    <h3 class="winner-name" id="winnerName">-</h3>
-                  </div>
-                  <div>
-                    <button class="btn" id="addPointBtn">إضافة نقطة</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="team-buzz-grid" id="hostBuzzGrid"></div>
-          </div>
-        </div>
-
-        <div class="side-grid">
-          <div class="card">
-            <div class="card-header">
-              <h2 class="card-title">إدارة الفرق</h2>
-              <p class="card-desc">إضافة أسماء الفرق وتعديلها قبل بدء اللعبة</p>
-            </div>
-            <div class="card-content">
-              <div id="teamManageList"></div>
-              <div class="team-manage-row" style="margin-top:16px;">
-                <input class="input" id="newTeamName" placeholder="أضف فريق جديد" maxlength="40" />
-                <button class="btn" id="addTeamBtn">إضافة</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <h2 class="card-title">ربط أجهزة اللاعبين</h2>
-              <p class="card-desc">يمكن للاعبين إدخال الكود أو مسح الـ QR للانضمام لنفس الجلسة</p>
-            </div>
-            <div class="card-content">
-              <div class="join-box">
-                <div>رابط الدخول:</div>
-                <span class="join-url" id="joinUrlText"></span>
-              </div>
-              <div class="join-box" style="margin-top:12px;">
-                لكي يعمل المسح من الجوال، افتح الموقع برابط HTTPS ثم امسح QR أو افتح الرابط مباشرة.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="tab-panel" id="tab-device">
-      <div class="card device-card">
-        <div class="card-header">
-          <h2 class="card-title">واجهة اللاعب على الجوال</h2>
-          <p class="card-desc">مثال على الجهاز الذي يدخل بالكود أو يمسح QR وينتظر إتاحة الضغط</p>
-        </div>
-        <div class="card-content">
-          <div class="device-form">
-            <div class="field">
-              <label for="deviceName">اسم الجهاز / اللاعب</label>
-              <input class="input" id="deviceName" value="جهاز لاعب 1" maxlength="40" />
-            </div>
-            <div class="field">
-              <label for="selectedTeam">اختر الفريق</label>
-              <select class="select" id="selectedTeam"></select>
-            </div>
-          </div>
-
-          <div class="device-form">
-            <div class="field">
-              <label for="joinCodeInput">أدخل كود الجلسة</label>
-              <input class="input" id="joinCodeInput" placeholder="مثال: AB12CD" maxlength="10" />
-            </div>
-            <div class="field" style="display:flex; align-items:end; gap:10px;">
-              <button class="btn" id="joinByCodeBtn" style="width:100%;">انضمام بالكود</button>
-            </div>
-          </div>
-
-          <div class="connected-box">
-            <div>
-              <div class="connected-label">متصل على الجلسة</div>
-              <div class="connected-code" id="deviceSessionCode">------</div>
-            </div>
-            <span class="state-badge green" id="connectionBadge">متصل</span>
-          </div>
-
-          <button class="big-buzz" id="deviceBuzzBtn">اضغط للإجابة</button>
-
-          <div class="stats-grid">
-            <div class="stat-box">
-              <div class="stat-label">الحالة</div>
-              <div class="stat-value" id="deviceStateText">جاهز</div>
-            </div>
-            <div class="stat-box">
-              <div class="stat-label">المؤقت</div>
-              <div class="stat-value"><span id="deviceTimeLeft">20</span> ث</div>
-            </div>
-            <div class="stat-box">
-              <div class="stat-label">الفريق</div>
-              <div class="stat-value" id="deviceTeamName">-</div>
-            </div>
-          </div>
-
-          <div class="card scanner-card">
-            <div class="card-header">
-              <h3 class="card-title" style="font-size:20px;">مسح QR من الجوال</h3>
-              <p class="card-desc">افتح هذا التبويب من الجوال ثم اضغط تشغيل الكاميرا وامسح الكود</p>
-            </div>
-            <div class="card-content">
-              <div class="scanner-wrap">
-                <div class="scanner-actions">
-                  <button class="btn" id="startScannerBtn">تشغيل الكاميرا</button>
-                  <button class="btn outline" id="stopScannerBtn">إيقاف الكاميرا</button>
-                </div>
-                <div id="reader"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </div>
-
-  <div class="toast" id="toast"></div>
-
- <script type="module" src="app.js"></script>
-</body>
+    <script type="module" src="app.js"></script>
+  </body>
 </html>

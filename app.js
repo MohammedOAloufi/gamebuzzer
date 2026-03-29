@@ -15,7 +15,7 @@ import {
 const firebaseConfig = {
   apiKey: "AIzaSyBMY5kBb_UIV8jpDM2Pj8cm-3aKg78VnC0",
   authDomain: "gamebuzzuer.firebaseapp.com",
-  databaseURL: "https://gamebuzzuer-default-rtdb.firebaseio.com",
+  databaseURL: "https://gamebuzzuer-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "gamebuzzuer",
   storageBucket: "gamebuzzuer.firebasestorage.app",
   messagingSenderId: "952611711946",

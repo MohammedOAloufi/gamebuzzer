@@ -13,7 +13,7 @@ import {
 
 // ضع بيانات مشروعك من Firebase هنا
 const firebaseConfig = {
-  apiKey: "AIzaSy...",
+  apiKey: "AIzaSyBMY5kBb_UIV8jpDM2Pj8cm-3aKg78VnC0",
   authDomain: "gamebuzzuer.firebaseapp.com",
   databaseURL: "https://gamebuzzuer-default-rtdb.firebaseio.com",
   projectId: "gamebuzzuer",

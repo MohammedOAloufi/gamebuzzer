@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game Buzzer | اللاعب</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container player-page-container">
+      <div class="card device-card compact-player-card">
+        <div class="card-header compact-player-header">
+          <h2 class="card-title">جلسة اللاعب</h2>
+          <p class="card-desc">
+            اختر الفريق ثم انتظر السماح بالضغط
+          </p>
+        </div>
+
+        <div class="card-content compact-player-content">
+          <div class="device-form compact-player-form">
+            <div class="field player-name-field">
+              <label for="deviceName">اسم اللاعب / الجهاز</label>
+              <input
+                class="input"
+                id="deviceName"
+                value="لاعب 1"
+                maxlength="40"
+              />
+            </div>
+
+            <div class="field player-team-field">
+              <label for="selectedTeam">اختر الفريق</label>
+              <select class="select" id="selectedTeam"></select>
+            </div>
+          </div>
+
+          <div class="connected-box compact-connected-box">
+            <div>
+              <div class="connected-label">كود الجلسة</div>
+              <div
+                class="connected-code compact-session-code"
+                id="deviceSessionCode"
+              >
+                ------
+              </div>
+            </div>
+            <span class="state-badge green" id="connectionBadge">متصل</span>
+          </div>
+
+          <button class="big-buzz compact-buzz-btn" id="deviceBuzzBtn">
+            اضغط
+          </button>
+
+          <div class="stats-grid compact-player-stats">
+            <div class="stat-box">
+              <div class="stat-label">الوقت</div>
+              <div class="stat-value">
+                <span id="deviceTimeLeft">3</span> ث
+              </div>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-label">النقاط</div>
+              <div class="stat-value" id="deviceTeamPoints">0</div>
+            </div>
+
+            <div class="stat-box optional-mobile-hide">
+              <div class="stat-label">الحالة</div>
+              <div class="stat-value" id="deviceStateText">جاهز</div>
+            </div>
+
+            <div class="stat-box optional-mobile-hide">
+              <div class="stat-label">الفريق</div>
+              <div class="stat-value" id="deviceTeamName">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

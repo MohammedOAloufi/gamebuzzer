@@ -348,18 +348,16 @@ function renderHostBuzzButtons(session) {
     const isWinner = session.winnerTeamId === team.id;
 
     const button = document.createElement("button");
-    button.className = "team-buzz-btn";
+    button.className = `team-buzz-btn ${team.colorClass}`;
     button.disabled = !canBuzz(session);
-
-    button.style.background = isWinner ? "#22c55e" : "#ef4444";
 
     button.innerHTML = `
       <div class="team-buzz-top">
         <span class="team-buzz-name">${escapeHtml(team.name)}</span>
-        <span>🔔</span>
+        <span>${isWinner ? "✅" : "🔔"}</span>
       </div>
       <div class="team-buzz-note">${
-        isWinner ? "هذا هو الفريق الذي ضغط أولاً" : "بانتظار الضغط"
+        isWinner ? "هذا هو الفريق الذي ضغط أولاً" : "ضغط تجريبي من شاشة المشرف"
       }</div>
     `;
 

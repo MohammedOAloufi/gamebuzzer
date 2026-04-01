@@ -84,12 +84,11 @@
             </div>
 
             <div class="actions compact-actions">
-              <button class="btn" id="startRoundBtn">بدء الجولة</button>
               <button class="btn secondary" id="toggleTimerBtn">
                 تشغيل المؤقت
               </button>
-              <button class="btn outline" id="resetRoundBtn">
-                إعادة الجولة
+              <button class="btn secondary" id="openAllBtn">
+                مفتوح للجميع
               </button>
               <button class="btn outline" id="toggleLockBtn">
                 قفل الأزرار
@@ -112,12 +111,19 @@
                   <div>
                     <div class="winner-sub">تم استلام الضغط من</div>
                     <h3 class="winner-name" id="winnerName">-</h3>
-                    <div class="winner-sub" id="winnerTeamText" style="margin-top: 8px">
+                    <div
+                      class="winner-sub"
+                      id="winnerTeamText"
+                      style="margin-top: 8px"
+                    >
                       الفريق: -
                     </div>
                   </div>
-                  <div>
+                  <div class="winner-actions">
                     <button class="btn" id="addPointBtn">إضافة نقطة</button>
+                    <button class="btn outline" id="removePointBtn">
+                      حذف نقطة
+                    </button>
                   </div>
                 </div>
               </div>

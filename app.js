@@ -35,9 +35,8 @@ const TEAM_COLORS = [
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
-  if (path.endsWith("/player.html") || path.includes("player.html")) {
+  if (path.endsWith("/player.html") || path.includes("player.html"))
     return "player";
-  }
   return "home";
 })();
 
@@ -47,11 +46,15 @@ const local = {
   deviceId: crypto.randomUUID
     ? crypto.randomUUID()
     : `device-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  joinedPlayer: false,
+  lastSession: null,
+  uiTickerStarted: false,
 };
 
 const els = {
   sessionCode: document.getElementById("sessionCode"),
   deviceSessionCode: document.getElementById("deviceSessionCode"),
+  miniSessionCode: document.getElementById("miniSessionCode"),
   createSessionBtn: document.getElementById("createSessionBtn"),
   copyCodeBtn: document.getElementById("copyCodeBtn"),
   copyJoinBtn: document.getElementById("copyJoinBtn"),
@@ -63,17 +66,17 @@ const els = {
   progressBar: document.getElementById("progressBar"),
   lockStatusBadge: document.getElementById("lockStatusBadge"),
   timerStatusBadge: document.getElementById("timerStatusBadge"),
-  startRoundBtn: document.getElementById("startRoundBtn"),
   toggleTimerBtn: document.getElementById("toggleTimerBtn"),
-  resetRoundBtn: document.getElementById("resetRoundBtn"),
   toggleLockBtn: document.getElementById("toggleLockBtn"),
   clearWinnerBtn: document.getElementById("clearWinnerBtn"),
+  openAllBtn: document.getElementById("openAllBtn"),
 
   winnerEmpty: document.getElementById("winnerEmpty"),
   winnerBox: document.getElementById("winnerBox"),
   winnerName: document.getElementById("winnerName"),
   winnerTeamText: document.getElementById("winnerTeamText"),
   addPointBtn: document.getElementById("addPointBtn"),
+  removePointBtn: document.getElementById("removePointBtn"),
 
   hostBuzzGrid: document.getElementById("hostBuzzGrid"),
   teamManageList: document.getElementById("teamManageList"),
@@ -83,11 +86,14 @@ const els = {
   selectedTeam: document.getElementById("selectedTeam"),
   deviceName: document.getElementById("deviceName"),
   deviceBuzzBtn: document.getElementById("deviceBuzzBtn"),
-  deviceStateText: document.getElementById("deviceStateText"),
-  deviceTimeLeft: document.getElementById("deviceTimeLeft"),
   deviceTeamName: document.getElementById("deviceTeamName"),
-  deviceTeamPoints: document.getElementById("deviceTeamPoints"),
   connectionBadge: document.getElementById("connectionBadge"),
+  answerTimeBig: document.getElementById("answerTimeBig"),
+  cooldownTimeLeft: document.getElementById("cooldownTimeLeft"),
+
+  joinView: document.getElementById("joinView"),
+  buzzerView: document.getElementById("buzzerView"),
+  joinPlayerBtn: document.getElementById("joinPlayerBtn"),
 
   timeSelector: document.getElementById("timeSelector"),
   cooldownSelector: document.getElementById("cooldownSelector"),
@@ -174,7 +180,9 @@ function updateQRCode(code = local.currentSessionCode) {
 
 function normalizeSession(raw, code) {
   const safeTeams =
-    Array.isArray(raw?.teams) && raw.teams.length > 0 ? raw.teams : defaultTeams();
+    Array.isArray(raw?.teams) && raw.teams.length > 0
+      ? raw.teams
+      : defaultTeams();
 
   const parsedTimeLeft = Number(raw?.timeLeft);
   const parsedMaxTime = Number(raw?.maxTime);
@@ -196,14 +204,15 @@ function normalizeSession(raw, code) {
     roundStartedAt: raw?.roundStartedAt ?? null,
     roundEndsAt: raw?.roundEndsAt ?? null,
     hostUpdatedAt: raw?.hostUpdatedAt ?? null,
+    cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 3,
+    cooldownEndsAt: raw?.cooldownEndsAt ?? null,
+    cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
     teams: safeTeams.map((team) => ({
       id: Number(team.id),
       name: String(team.name || "فريق"),
       colorClass: String(team.colorClass || "team-slate"),
       points: Number(team.points || 0),
     })),
-    cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 3,
-    cooldownEndsAt: raw?.cooldownEndsAt ?? null,
   };
 }
 
@@ -225,22 +234,121 @@ function getCurrentPlayerName() {
   return sanitizeName(els.deviceName?.value) || "لاعب";
 }
 
-function canBuzz(session) {
-  const cooldownActive =
-    Boolean(session.cooldownEndsAt) && Date.now() < Number(session.cooldownEndsAt);
-
+function isMyCooldownActive(session) {
   return (
+    Boolean(session.cooldownPlayerId) &&
+    session.cooldownPlayerId === local.deviceId &&
+    Boolean(session.cooldownEndsAt) &&
+    Date.now() < Number(session.cooldownEndsAt)
+  );
+}
+
+function canBuzz(session) {
+  return (
+    local.joinedPlayer &&
     !session.locked &&
     session.winnerTeamId === null &&
     session.timeLeft > 0 &&
-    !cooldownActive
+    !isMyCooldownActive(session)
   );
+}
+
+function getCooldownSecondsLeft(session) {
+  if (!isMyCooldownActive(session)) return 0;
+  return Math.max(
+    0,
+    Math.ceil((Number(session.cooldownEndsAt) - Date.now()) / 1000),
+  );
+}
+
+function showPlayerJoinView() {
+  if (els.joinView) els.joinView.classList.remove("hidden");
+  if (els.buzzerView) els.buzzerView.classList.add("hidden");
+}
+
+function showPlayerBuzzerView() {
+  if (els.joinView) els.joinView.classList.add("hidden");
+  if (els.buzzerView) els.buzzerView.classList.remove("hidden");
+}
+
+function savePlayerDraft() {
+  try {
+    const payload = {
+      name: sanitizeName(els.deviceName?.value),
+      teamId: getSelectedTeamId(),
+    };
+    localStorage.setItem("gb_player_profile", JSON.stringify(payload));
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function loadPlayerDraft() {
+  try {
+    const raw = localStorage.getItem("gb_player_profile");
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (els.deviceName && data?.name) els.deviceName.value = String(data.name);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function startUiTicker() {
+  if (local.uiTickerStarted) return;
+  local.uiTickerStarted = true;
+
+  setInterval(() => {
+    if (!local.lastSession) return;
+
+    const session = normalizeSession(
+      local.lastSession,
+      local.currentSessionCode,
+    );
+
+    if (
+      session.cooldownPlayerId &&
+      session.cooldownEndsAt &&
+      Date.now() >= Number(session.cooldownEndsAt)
+    ) {
+      session.cooldownPlayerId = "";
+      session.cooldownEndsAt = null;
+    }
+
+    renderSession(session);
+  }, 250);
+}
+
+async function syncHostSettings() {
+  if (pageType !== "host" || !local.currentSessionCode) return;
+
+  try {
+    const session = await readCurrentSession();
+    const newMaxTime = Number(els.timeSelector?.value || 3);
+    const newCooldown = Number(els.cooldownSelector?.value || 3);
+
+    const patch = {
+      maxTime: newMaxTime,
+      cooldown: newCooldown,
+      hostUpdatedAt: Date.now(),
+    };
+
+    if (!session.timerRunning && session.winnerTeamId === null) {
+      patch.timeLeft = newMaxTime;
+    }
+
+    await updateSessionPatch(patch);
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function renderSession(session) {
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
-  if (els.joinUrlText) els.joinUrlText.textContent = getPlayerJoinUrl(session.code);
+  if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
+  if (els.joinUrlText)
+    els.joinUrlText.textContent = getPlayerJoinUrl(session.code);
 
   updateQRCode(session.code);
 
@@ -249,13 +357,20 @@ function renderSession(session) {
 
   if (els.timeLeftText) els.timeLeftText.textContent = String(session.timeLeft);
   if (els.timerBig) els.timerBig.textContent = String(session.timeLeft);
-  if (els.deviceTimeLeft) els.deviceTimeLeft.textContent = String(session.timeLeft);
+  if (els.answerTimeBig)
+    els.answerTimeBig.textContent = String(session.timeLeft);
+  if (els.cooldownTimeLeft) {
+    els.cooldownTimeLeft.textContent = String(getCooldownSecondsLeft(session));
+  }
+
   if (els.progressBar) {
     els.progressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
   }
 
   if (els.timerStatusBadge) {
-    els.timerStatusBadge.textContent = session.timerRunning ? "الوقت يعمل" : "متوقف";
+    els.timerStatusBadge.textContent = session.timerRunning
+      ? "الوقت يعمل"
+      : "متوقف";
     els.timerStatusBadge.className = `state-badge ${
       session.timerRunning ? "green" : ""
     }`.trim();
@@ -275,23 +390,25 @@ function renderSession(session) {
   }
 
   if (els.toggleLockBtn) {
-    els.toggleLockBtn.textContent = session.locked ? "فتح الأزرار" : "قفل الأزرار";
+    els.toggleLockBtn.textContent = session.locked
+      ? "فتح الأزرار"
+      : "قفل الأزرار";
   }
 
-  if (els.deviceStateText) {
-    const cooldownActive =
-      Boolean(session.cooldownEndsAt) &&
-      Date.now() < Number(session.cooldownEndsAt);
+  if (
+    els.timeSelector &&
+    pageType === "host" &&
+    document.activeElement !== els.timeSelector
+  ) {
+    els.timeSelector.value = String(session.maxTime || 3);
+  }
 
-    if (session.locked && session.winnerTeamId !== null) {
-      els.deviceStateText.textContent = "تم اختيار لاعب";
-    } else if (cooldownActive) {
-      els.deviceStateText.textContent = "ممنوع مؤقتًا";
-    } else if (session.locked) {
-      els.deviceStateText.textContent = "مقفل";
-    } else {
-      els.deviceStateText.textContent = "جاهز";
-    }
+  if (
+    els.cooldownSelector &&
+    pageType === "host" &&
+    document.activeElement !== els.cooldownSelector
+  ) {
+    els.cooldownSelector.value = String(session.cooldown || 3);
   }
 
   if (els.deviceBuzzBtn) {
@@ -299,23 +416,30 @@ function renderSession(session) {
     els.deviceBuzzBtn.disabled = !enabled;
 
     const amIWinner =
-      session.winnerPlayerId &&
-      session.winnerPlayerId === local.deviceId;
+      session.winnerPlayerId && session.winnerPlayerId === local.deviceId;
 
-    els.deviceBuzzBtn.classList.remove("active");
-    els.deviceBuzzBtn.style.background = amIWinner ? "#22c55e" : "#ef4444";
+    if (amIWinner) {
+      els.deviceBuzzBtn.style.background = "#22c55e";
+    } else if (isMyCooldownActive(session)) {
+      els.deviceBuzzBtn.style.background = "#64748b";
+    } else {
+      els.deviceBuzzBtn.style.background = "#ef4444";
+    }
   }
 
   if (els.connectionBadge) {
-    els.connectionBadge.textContent = "متصل";
-    els.connectionBadge.className = "state-badge green";
+    els.connectionBadge.textContent = local.joinedPlayer
+      ? "متصل"
+      : "بانتظار الانضمام";
+    els.connectionBadge.className =
+      `state-badge ${local.joinedPlayer ? "green" : ""}`.trim();
   }
 
   renderWinner(session);
   renderHostBuzzButtons(session);
   renderTeamManager(session);
   renderTeamSelect(session);
-  renderPlayerScore(session);
+  renderPlayerTeam(session);
 }
 
 function renderWinner(session) {
@@ -425,7 +549,20 @@ function renderTeamManager(session) {
 function renderTeamSelect(session) {
   if (!els.selectedTeam) return;
 
-  const currentValue = Number(els.selectedTeam.value) || session.teams[0]?.id || 1;
+  const storedTeamId = (() => {
+    try {
+      const raw = localStorage.getItem("gb_player_profile");
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      return Number(data?.teamId);
+    } catch (error) {
+      return null;
+    }
+  })();
+
+  const currentValue =
+    Number(els.selectedTeam.value) || storedTeamId || session.teams[0]?.id || 1;
+
   els.selectedTeam.innerHTML = "";
 
   session.teams.forEach((team) => {
@@ -436,19 +573,13 @@ function renderTeamSelect(session) {
     els.selectedTeam.appendChild(option);
   });
 
-  const selected = session.teams.find(
-    (team) => team.id === Number(els.selectedTeam.value),
-  );
-
-  if (els.deviceTeamName) {
-    els.deviceTeamName.textContent = selected ? selected.name : "-";
-  }
+  renderPlayerTeam(session);
 }
 
-function renderPlayerScore(session) {
-  if (!els.deviceTeamPoints) return;
-  const selectedTeam = getSelectedTeam(session);
-  els.deviceTeamPoints.textContent = String(selectedTeam?.points ?? 0);
+function renderPlayerTeam(session) {
+  if (!els.deviceTeamName) return;
+  const selected = getSelectedTeam(session);
+  els.deviceTeamName.textContent = selected ? selected.name : "-";
 }
 
 async function ensureSession(code) {
@@ -474,6 +605,7 @@ async function ensureSession(code) {
       teams: defaultTeams(),
       cooldown: 3,
       cooldownEndsAt: null,
+      cooldownPlayerId: "",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
@@ -483,13 +615,15 @@ async function ensureSession(code) {
 }
 
 async function attachPresence(code) {
-  if (pageType !== "player" || !els.deviceName) return;
+  if (pageType !== "player" || !els.deviceName || !local.joinedPlayer) return;
 
   const pRef = presenceRef(code);
   const playerName = getCurrentPlayerName();
+  const teamId = getSelectedTeamId();
 
   await set(pRef, {
     name: playerName,
+    teamId: Number.isFinite(teamId) ? teamId : null,
     at: Date.now(),
     userAgent: navigator.userAgent,
   });
@@ -520,6 +654,7 @@ async function subscribeToSession(code) {
       }
 
       const session = normalizeSession(snapshot.val(), code);
+      local.lastSession = snapshot.val();
       renderSession(session);
     },
     (error) => {
@@ -527,8 +662,6 @@ async function subscribeToSession(code) {
       showToast("تعذر الاتصال بالجلسة", true);
     },
   );
-
-  await attachPresence(code);
 }
 
 async function createOrLoadSession(code = randomCode()) {
@@ -555,25 +688,18 @@ async function updateSessionPatch(patch) {
   });
 }
 
-async function startRound() {
-  const session = await readCurrentSession();
-
-  const selectedTime = Number(els.timeSelector?.value || 3);
-  const cooldown = Number(els.cooldownSelector?.value || 3);
-
+async function resetToFreshRound(session, extraPatch = {}) {
   await updateSessionPatch({
-    locked: false,
-    timerRunning: true,
-    timeLeft: selectedTime,
-    maxTime: selectedTime,
-    cooldown,
-    cooldownEndsAt: null,
     winnerTeamId: null,
     winnerPlayerName: "",
     winnerPlayerId: "",
     winnerPressedAt: null,
-    roundStartedAt: Date.now(),
-    roundEndsAt: Date.now() + selectedTime * 1000,
+    locked: false,
+    timerRunning: false,
+    roundStartedAt: null,
+    roundEndsAt: null,
+    timeLeft: session.maxTime || Number(els.timeSelector?.value || 3),
+    ...extraPatch,
     hostUpdatedAt: Date.now(),
   });
 }
@@ -599,24 +725,6 @@ async function toggleTimer() {
   }
 }
 
-async function resetRound() {
-  const session = await readCurrentSession();
-
-  await updateSessionPatch({
-    locked: false,
-    timerRunning: false,
-    timeLeft: session.maxTime || 3,
-    winnerTeamId: null,
-    winnerPlayerName: "",
-    winnerPlayerId: "",
-    winnerPressedAt: null,
-    cooldownEndsAt: null,
-    roundStartedAt: null,
-    roundEndsAt: null,
-    hostUpdatedAt: Date.now(),
-  });
-}
-
 async function toggleLock() {
   const session = await readCurrentSession();
 
@@ -627,15 +735,30 @@ async function toggleLock() {
 }
 
 async function clearWinner() {
-  await updateSessionPatch({
-    winnerTeamId: null,
-    winnerPlayerName: "",
-    winnerPlayerId: "",
-    winnerPressedAt: null,
-    locked: false,
+  const session = await readCurrentSession();
+
+  await resetToFreshRound(session, {
     cooldownEndsAt: null,
-    hostUpdatedAt: Date.now(),
+    cooldownPlayerId: "",
   });
+}
+
+async function moveWinnerToCooldown() {
+  const session = await readCurrentSession();
+
+  if (!session.winnerPlayerId) {
+    await resetToFreshRound(session);
+    return;
+  }
+
+  await resetToFreshRound(session, {
+    cooldownPlayerId: session.winnerPlayerId,
+    cooldownEndsAt: Date.now() + session.cooldown * 1000,
+  });
+}
+
+async function openAllForPlayers() {
+  await moveWinnerToCooldown();
 }
 
 async function claimBuzz(teamId, playerName = "") {
@@ -651,14 +774,18 @@ async function claimBuzz(teamId, playerName = "") {
     if (!current) return current;
 
     const safe = normalizeSession(current, local.currentSessionCode);
-    const cooldownActive =
-      Boolean(safe.cooldownEndsAt) && Date.now() < Number(safe.cooldownEndsAt);
+
+    const myCooldownActive =
+      Boolean(safe.cooldownPlayerId) &&
+      safe.cooldownPlayerId === local.deviceId &&
+      Boolean(safe.cooldownEndsAt) &&
+      Date.now() < Number(safe.cooldownEndsAt);
 
     if (
       safe.locked ||
       safe.winnerTeamId !== null ||
       safe.timeLeft <= 0 ||
-      cooldownActive
+      myCooldownActive
     ) {
       return current;
     }
@@ -670,9 +797,14 @@ async function claimBuzz(teamId, playerName = "") {
       winnerPlayerId: local.deviceId,
       winnerPressedAt: Date.now(),
       locked: true,
-      timerRunning: false,
-      roundEndsAt: null,
-      cooldownEndsAt: Date.now() + safe.cooldown * 1000,
+      timerRunning: true,
+      roundStartedAt: Date.now(),
+      roundEndsAt: Date.now() + safe.timeLeft * 1000,
+
+      // إلغاء منع اللاعب السابق مباشرة عند وجود فائز جديد
+      cooldownPlayerId: "",
+      cooldownEndsAt: null,
+
       hostUpdatedAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -690,6 +822,23 @@ async function addPoint() {
   const teams = session.teams.map((team) =>
     team.id === session.winnerTeamId
       ? { ...team, points: Number(team.points || 0) + 1 }
+      : team,
+  );
+
+  await resetToFreshRound(session, {
+    teams,
+    cooldownPlayerId: "",
+    cooldownEndsAt: null,
+  });
+}
+
+async function removePoint() {
+  const session = await readCurrentSession();
+  if (session.winnerTeamId == null) return;
+
+  const teams = session.teams.map((team) =>
+    team.id === session.winnerTeamId
+      ? { ...team, points: Math.max(0, Number(team.points || 0) - 1) }
       : team,
   );
 
@@ -739,6 +888,9 @@ async function removeTeam(teamId) {
     patch.winnerPlayerId = "";
     patch.winnerPressedAt = null;
     patch.locked = false;
+    patch.timerRunning = false;
+    patch.roundStartedAt = null;
+    patch.roundEndsAt = null;
   }
 
   await updateSessionPatch(patch);
@@ -798,25 +950,51 @@ async function startTickWorker() {
       const snapshot = await get(sessionRef(local.currentSessionCode));
       if (!snapshot.exists()) return;
 
-      const session = normalizeSession(snapshot.val(), local.currentSessionCode);
+      const session = normalizeSession(
+        snapshot.val(),
+        local.currentSessionCode,
+      );
       if (!session.timerRunning || !session.roundEndsAt) return;
 
       const leftMs = Number(session.roundEndsAt) - Date.now();
       const nextLeft = Math.max(0, Math.ceil(leftMs / 1000));
 
-      if (nextLeft !== session.timeLeft) {
-        const patch = {
+      if (nextLeft > 0 && nextLeft !== session.timeLeft) {
+        await update(sessionRef(local.currentSessionCode), {
           timeLeft: nextLeft,
           updatedAt: Date.now(),
-        };
+        });
+        return;
+      }
 
-        if (nextLeft <= 0) {
-          patch.timerRunning = false;
-          patch.roundEndsAt = null;
-          patch.locked = true;
+      if (nextLeft <= 0) {
+        if (session.winnerPlayerId) {
+          await update(sessionRef(local.currentSessionCode), {
+            timeLeft: session.maxTime || 3,
+            timerRunning: false,
+            roundEndsAt: null,
+            roundStartedAt: null,
+            locked: false,
+            cooldownPlayerId: session.winnerPlayerId,
+            cooldownEndsAt: Date.now() + session.cooldown * 1000,
+            winnerTeamId: null,
+            winnerPlayerName: "",
+            winnerPlayerId: "",
+            winnerPressedAt: null,
+            updatedAt: Date.now(),
+          });
+        } else {
+          await update(sessionRef(local.currentSessionCode), {
+            timeLeft: session.maxTime || 3,
+            timerRunning: false,
+            roundEndsAt: null,
+            roundStartedAt: null,
+            locked: false,
+            cooldownPlayerId: "",
+            cooldownEndsAt: null,
+            updatedAt: Date.now(),
+          });
         }
-
-        await update(sessionRef(local.currentSessionCode), patch);
       }
     } catch (error) {
       console.error(error);
@@ -851,17 +1029,6 @@ function bindHostEvents() {
     );
   }
 
-  if (els.startRoundBtn) {
-    els.startRoundBtn.addEventListener("click", async () => {
-      try {
-        await startRound();
-      } catch (error) {
-        console.error(error);
-        showToast("تعذر بدء الجولة", true);
-      }
-    });
-  }
-
   if (els.toggleTimerBtn) {
     els.toggleTimerBtn.addEventListener("click", async () => {
       try {
@@ -873,13 +1040,13 @@ function bindHostEvents() {
     });
   }
 
-  if (els.resetRoundBtn) {
-    els.resetRoundBtn.addEventListener("click", async () => {
+  if (els.openAllBtn) {
+    els.openAllBtn.addEventListener("click", async () => {
       try {
-        await resetRound();
+        await openAllForPlayers();
       } catch (error) {
         console.error(error);
-        showToast("تعذر إعادة الجولة", true);
+        showToast("تعذر فتح الأزرار للجميع", true);
       }
     });
   }
@@ -917,6 +1084,17 @@ function bindHostEvents() {
     });
   }
 
+  if (els.removePointBtn) {
+    els.removePointBtn.addEventListener("click", async () => {
+      try {
+        await removePoint();
+      } catch (error) {
+        console.error(error);
+        showToast("تعذر حذف النقطة", true);
+      }
+    });
+  }
+
   if (els.addTeamBtn) {
     els.addTeamBtn.addEventListener("click", async () => {
       try {
@@ -938,18 +1116,23 @@ function bindHostEvents() {
       }
     });
   }
+
+  if (els.timeSelector) {
+    els.timeSelector.addEventListener("change", syncHostSettings);
+  }
+
+  if (els.cooldownSelector) {
+    els.cooldownSelector.addEventListener("change", syncHostSettings);
+  }
 }
 
 function bindPlayerEvents() {
   if (els.selectedTeam) {
     els.selectedTeam.addEventListener("change", async () => {
       try {
+        savePlayerDraft();
         const session = await readCurrentSession();
-        const option = els.selectedTeam.options[els.selectedTeam.selectedIndex];
-        if (els.deviceTeamName) {
-          els.deviceTeamName.textContent = option ? option.textContent : "-";
-        }
-        renderPlayerScore(session);
+        renderPlayerTeam(session);
       } catch (error) {
         console.error(error);
       }
@@ -957,12 +1140,37 @@ function bindPlayerEvents() {
   }
 
   if (els.deviceName) {
-    els.deviceName.addEventListener("change", async () => {
+    els.deviceName.addEventListener("input", () => {
+      savePlayerDraft();
+    });
+  }
+
+  if (els.joinPlayerBtn) {
+    els.joinPlayerBtn.addEventListener("click", async () => {
       try {
-        if (!local.currentSessionCode) return;
+        const playerName = getCurrentPlayerName();
+        const teamId = getSelectedTeamId();
+
+        if (!playerName) {
+          showToast("اكتب اسم اللاعب", true);
+          return;
+        }
+
+        if (!Number.isFinite(teamId)) {
+          showToast("اختر الفريق أولاً", true);
+          return;
+        }
+
+        local.joinedPlayer = true;
+        savePlayerDraft();
+        showPlayerBuzzerView();
         await attachPresence(local.currentSessionCode);
+        const session = await readCurrentSession();
+        renderPlayerTeam(session);
+        showToast("تم الانضمام");
       } catch (error) {
         console.error(error);
+        showToast("تعذر الانضمام إلى الجلسة", true);
       }
     });
   }
@@ -973,6 +1181,11 @@ function bindPlayerEvents() {
         const teamId = getSelectedTeamId();
         if (!Number.isFinite(teamId)) {
           showToast("اختر الفريق أولاً", true);
+          return;
+        }
+
+        if (!local.joinedPlayer) {
+          showToast("يجب الانضمام أولاً", true);
           return;
         }
 
@@ -995,6 +1208,8 @@ async function boot() {
   if (pageType === "home") return;
 
   bindEvents();
+  loadPlayerDraft();
+  startUiTicker();
   await startTickWorker();
 
   const queryCode = new URLSearchParams(location.search).get("session");
@@ -1016,6 +1231,8 @@ async function boot() {
   }
 
   if (pageType === "player") {
+    showPlayerJoinView();
+
     const snapshot = await get(sessionRef(cleanCode));
     if (!snapshot.exists()) {
       if (els.connectionBadge) {

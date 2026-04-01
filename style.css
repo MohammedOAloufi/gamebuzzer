@@ -133,7 +133,6 @@ body {
   padding: 18px 20px;
 }
 
-/* تحسين خاص للصفحة الرئيسية */
 .home-hero {
   max-width: 1120px;
   margin: 0 auto;
@@ -548,6 +547,12 @@ select {
   align-items: center;
 }
 
+.winner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .winner-sub {
   color: rgba(255, 255, 255, 0.85);
   margin-bottom: 6px;
@@ -798,6 +803,110 @@ select {
   font-weight: 800;
 }
 
+.player-join-card {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.player-join-header,
+.player-join-content {
+  text-align: center;
+}
+
+.player-join-form {
+  grid-template-columns: 1fr;
+  margin-top: 18px;
+}
+
+.join-session-code-box {
+  border-radius: 22px;
+  padding: 18px;
+  background: rgba(2, 6, 23, 0.45);
+  border: 1px solid var(--line);
+}
+
+.join-session-code {
+  font-size: 26px;
+  letter-spacing: 0.16em;
+}
+
+.join-player-btn {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.player-buzzer-card {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.player-buzzer-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-mini-session {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.player-main-buzz {
+  min-height: 230px;
+  font-size: 42px;
+  border-radius: 30px;
+}
+
+.player-answer-time-box {
+  margin-top: 16px;
+  text-align: center;
+  border-radius: 26px;
+  border: 1px solid var(--line);
+  background: rgba(2, 6, 23, 0.45);
+  padding: 20px 16px;
+}
+
+.player-answer-label {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.player-answer-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.player-answer-value span {
+  font-weight: 900;
+}
+
+#answerTimeBig {
+  font-size: 54px;
+  line-height: 1;
+  color: #c7d2fe;
+}
+
+.answer-time-unit {
+  font-size: 22px;
+  color: #cbd5e1;
+}
+
+.player-bottom-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.player-stat-box {
+  border-radius: 18px;
+  padding: 16px;
+}
+
 .toast {
   position: fixed;
   bottom: 20px;
@@ -864,47 +973,6 @@ select {
   );
 }
 
-/* تحسينات صفحة اللاعب */
-.compact-player-card {
-  max-width: 520px;
-}
-
-.compact-player-header {
-  padding-bottom: 0;
-}
-
-.compact-player-content {
-  padding-top: 14px;
-}
-
-.compact-player-form {
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.compact-connected-box {
-  padding: 12px 14px;
-  border-radius: 18px;
-  margin-bottom: 14px;
-}
-
-.compact-session-code {
-  font-size: 22px;
-  letter-spacing: 0.12em;
-}
-
-.compact-buzz-btn {
-  min-height: 150px;
-  font-size: 30px;
-  border-radius: 24px;
-}
-
-.compact-player-stats {
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 14px;
-}
-
 @media (max-width: 1100px) {
   .hero-inner,
   .hero-host-compact,
@@ -935,7 +1003,8 @@ select {
   .stats-grid,
   .player-stats-grid,
   .team-buzz-grid,
-  .compact-buzz-grid {
+  .compact-buzz-grid,
+  .player-bottom-stats {
     grid-template-columns: 1fr;
   }
 
@@ -955,12 +1024,22 @@ select {
     font-size: 30px;
   }
 
+  .player-main-buzz {
+    min-height: 170px;
+    font-size: 34px;
+  }
+
+  #answerTimeBig {
+    font-size: 42px;
+  }
+
   .winner-name {
     font-size: 24px;
   }
 
   .connected-code,
-  .session-code {
+  .session-code,
+  .join-session-code {
     font-size: 22px;
     letter-spacing: 0.12em;
   }
@@ -979,69 +1058,6 @@ select {
     font-size: 18px;
   }
 
-  /* وضع مصغر لصفحة اللاعب على الجوال */
-  .compact-player-card {
-    max-width: 100%;
-    border-radius: 18px;
-  }
-
-  .compact-player-header .card-title {
-    font-size: 18px;
-  }
-
-  .compact-player-header .card-desc {
-    font-size: 12px;
-  }
-
-  .player-name-field {
-    display: none;
-  }
-
-  .compact-player-form {
-    grid-template-columns: 1fr;
-    margin-bottom: 10px;
-  }
-
-  .compact-connected-box {
-    padding: 10px 12px;
-    border-radius: 16px;
-    margin-bottom: 12px;
-  }
-
-  .compact-session-code {
-    font-size: 18px;
-    letter-spacing: 0.08em;
-  }
-
-  .compact-buzz-btn {
-    min-height: 120px;
-    font-size: 24px;
-    border-radius: 20px;
-  }
-
-  .compact-player-stats {
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-
-  .compact-player-stats .stat-box {
-    border-radius: 16px;
-    padding: 12px;
-  }
-
-  .compact-player-stats .stat-label {
-    font-size: 11px;
-  }
-
-  .compact-player-stats .stat-value {
-    font-size: 16px;
-  }
-
-  .optional-mobile-hide {
-    display: none;
-  }
-
-  /* تصغير الودجت في الرئيسية على الجوال */
   .home-hero {
     max-width: 100%;
   }

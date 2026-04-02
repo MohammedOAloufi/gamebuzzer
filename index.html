@@ -43,6 +43,9 @@
                   placeholder="مثال: AB12CD"
                   maxlength="10"
                 />
+                <p class="join-error-message hidden" id="joinErrorMessage">
+                  كود الجلسة غير صحيح أو الجلسة غير موجودة
+                </p>
               </div>
 
               <div class="home-actions">
@@ -51,7 +54,7 @@
                 </button>
               </div>
 
-              <div class="top-note home-note" style="margin-top: 18px">
+              <div class="top-note home-note top-gap-18">
                 عند إنشاء الجلسة سيتم تحويلك مباشرة إلى صفحة المشرف، وعند الدخول
                 بالكود سيتم تحويلك إلى صفحة اللاعب.
               </div>
@@ -60,43 +63,6 @@
         </div>
       </section>
     </div>
-
-    <script>
-      function randomCode(length = 6) {
-        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        let code = "";
-        for (let i = 0; i < length; i++) {
-          code += chars[Math.floor(Math.random() * chars.length)];
-        }
-        return code;
-      }
-
-      const createSessionBtn = document.getElementById("createSessionBtn");
-      const joinSessionBtn = document.getElementById("joinSessionBtn");
-      const joinCodeInput = document.getElementById("joinCodeInput");
-
-      createSessionBtn.addEventListener("click", () => {
-        const code = randomCode();
-        window.location.href = `host.html?session=${encodeURIComponent(code)}`;
-      });
-
-      joinSessionBtn.addEventListener("click", () => {
-        const code = String(joinCodeInput.value || "")
-          .trim()
-          .toUpperCase();
-
-        if (!code) {
-          alert("اكتب كود الجلسة أولاً");
-          joinCodeInput.focus();
-          return;
-        }
-
-        window.location.href = `player.html?session=${encodeURIComponent(code)}`;
-      });
-
-      joinCodeInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") joinSessionBtn.click();
-      });
-    </script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

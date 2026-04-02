@@ -30,9 +30,7 @@
             <div class="header-row">
               <div>
                 <h2 class="card-title">حالة الجولة</h2>
-                <p class="card-desc">
-                  التحكم في الوقت وتحديد أول لاعب ضغط
-                </p>
+                <p class="card-desc">التحكم في الوقت وتحديد أول لاعب ضغط</p>
               </div>
 
               <div class="header-badges">
@@ -47,11 +45,6 @@
           <div class="card-content">
             <div class="timer-grid compact-timer-grid">
               <div>
-                <div class="progress-head">
-                  <span>الوقت المتبقي</span>
-                  <span><span id="timeLeftText">3</span> ثانية</span>
-                </div>
-
                 <div class="progress">
                   <div class="progress-bar" id="progressBar"></div>
                 </div>
@@ -83,17 +76,14 @@
               </div>
             </div>
 
-            <div class="actions compact-actions">
-              <button class="btn secondary" id="toggleTimerBtn">
-                تشغيل المؤقت
-              </button>
-              <button class="btn secondary" id="openAllBtn">
+            <div class="actions compact-actions host-action-buttons">
+              <button class="btn primary-soft" id="openAllBtn">
                 مفتوح للجميع
               </button>
-              <button class="btn outline" id="toggleLockBtn">
+              <button class="btn secondary-soft" id="toggleLockBtn">
                 قفل الأزرار
               </button>
-              <button class="btn danger" id="clearWinnerBtn">
+              <button class="btn danger-soft" id="clearWinnerBtn">
                 مسح الفائز
               </button>
             </div>
@@ -120,9 +110,8 @@
                     </div>
                   </div>
                   <div class="winner-actions">
-                    <button class="btn" id="addPointBtn">إضافة نقطة</button>
-                    <button class="btn outline" id="removePointBtn">
-                      حذف نقطة
+                    <button class="btn primary-soft" id="addPointBtn">
+                      إضافة نقطة
                     </button>
                   </div>
                 </div>
@@ -137,22 +126,20 @@
           <div class="card compact-card">
             <div class="card-header">
               <h2 class="card-title">إدارة الفرق</h2>
-              <p class="card-desc">
-                إضافة أسماء الفرق وتعديلها قبل بدء اللعبة
-              </p>
+              <p class="card-desc">إضافة أسماء الفرق وتعديلها قبل بدء اللعبة</p>
             </div>
 
             <div class="card-content">
               <div id="teamManageList"></div>
 
-              <div class="team-manage-row" style="margin-top: 12px">
+              <div class="team-manage-row add-team-row" style="margin-top: 12px">
                 <input
                   class="input"
                   id="newTeamName"
                   placeholder="أضف فريق جديد"
                   maxlength="40"
                 />
-                <button class="btn" id="addTeamBtn">إضافة</button>
+                <button class="btn primary-soft" id="addTeamBtn">إضافة</button>
               </div>
             </div>
           </div>
@@ -171,13 +158,13 @@
                   </div>
 
                   <div class="actions compact-actions">
-                    <button class="btn" id="createSessionBtn">
+                    <button class="btn primary-soft" id="createSessionBtn">
                       إنشاء / تحديث الجلسة
                     </button>
-                    <button class="btn secondary" id="copyCodeBtn">
+                    <button class="btn secondary-soft" id="copyCodeBtn">
                       نسخ الكود
                     </button>
-                    <button class="btn outline" id="copyJoinBtn">
+                    <button class="btn secondary-soft" id="copyJoinBtn">
                       نسخ الرابط
                     </button>
                   </div>

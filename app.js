@@ -25,18 +25,19 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 const TEAM_COLORS = [
-  "team-red",
   "team-blue",
+  "team-red",
   "team-green",
   "team-purple",
-  "team-slate",
+  "team-orange",
+  "team-yellow",
+  "team-cyan",
 ];
 
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
-  if (path.endsWith("/player.html") || path.includes("player.html"))
-    return "player";
+  if (path.endsWith("/player.html") || path.includes("player.html")) return "player";
   return "home";
 })();
 
@@ -49,6 +50,8 @@ const local = {
   joinedPlayer: false,
   lastSession: null,
   uiTickerStarted: false,
+  lastQrCodeValue: "",
+  lastTeamsRenderKey: "",
 };
 
 const els = {
@@ -61,12 +64,15 @@ const els = {
   joinUrlText: document.getElementById("joinUrlText"),
   qrcode: document.getElementById("qrcode"),
 
+  joinCodeInput: document.getElementById("joinCodeInput"),
+  joinSessionBtn: document.getElementById("joinSessionBtn"),
+  joinErrorMessage: document.getElementById("joinErrorMessage"),
+
   timeLeftText: document.getElementById("timeLeftText"),
   timerBig: document.getElementById("timerBig"),
   progressBar: document.getElementById("progressBar"),
   lockStatusBadge: document.getElementById("lockStatusBadge"),
   timerStatusBadge: document.getElementById("timerStatusBadge"),
-  toggleTimerBtn: document.getElementById("toggleTimerBtn"),
   toggleLockBtn: document.getElementById("toggleLockBtn"),
   clearWinnerBtn: document.getElementById("clearWinnerBtn"),
   openAllBtn: document.getElementById("openAllBtn"),
@@ -76,7 +82,6 @@ const els = {
   winnerName: document.getElementById("winnerName"),
   winnerTeamText: document.getElementById("winnerTeamText"),
   addPointBtn: document.getElementById("addPointBtn"),
-  removePointBtn: document.getElementById("removePointBtn"),
 
   hostBuzzGrid: document.getElementById("hostBuzzGrid"),
   teamManageList: document.getElementById("teamManageList"),
@@ -112,10 +117,8 @@ function randomCode(length = 6) {
 
 function defaultTeams() {
   return [
-    { id: 1, name: "الفريق الأحمر", colorClass: "team-red", points: 0 },
-    { id: 2, name: "الفريق الأزرق", colorClass: "team-blue", points: 0 },
-    { id: 3, name: "الفريق الأخضر", colorClass: "team-green", points: 0 },
-    { id: 4, name: "الفريق البنفسجي", colorClass: "team-purple", points: 0 },
+    { id: 1, name: "الفريق الأول", colorClass: "team-blue", points: 0 },
+    { id: 2, name: "الفريق الثاني", colorClass: "team-red", points: 0 },
   ];
 }
 
@@ -154,6 +157,17 @@ function showToast(message, isError = false) {
   }, 1800);
 }
 
+function showJoinError(message) {
+  if (!els.joinErrorMessage) return;
+  els.joinErrorMessage.textContent = message;
+  els.joinErrorMessage.classList.remove("hidden");
+}
+
+function hideJoinError() {
+  if (!els.joinErrorMessage) return;
+  els.joinErrorMessage.classList.add("hidden");
+}
+
 function getBaseUrl() {
   return `${window.location.origin}${window.location.pathname.replace(
     /[^/]+$/,
@@ -167,6 +181,9 @@ function getPlayerJoinUrl(code = local.currentSessionCode) {
 
 function updateQRCode(code = local.currentSessionCode) {
   if (!els.qrcode || typeof QRCode === "undefined") return;
+  if (!code) return;
+  if (local.lastQrCodeValue === code) return;
+
   els.qrcode.innerHTML = "";
   new QRCode(els.qrcode, {
     text: getPlayerJoinUrl(code),
@@ -176,6 +193,8 @@ function updateQRCode(code = local.currentSessionCode) {
     colorLight: "#ffffff",
     correctLevel: QRCode.CorrectLevel.H,
   });
+
+  local.lastQrCodeValue = code;
 }
 
 function normalizeSession(raw, code) {
@@ -204,9 +223,12 @@ function normalizeSession(raw, code) {
     roundStartedAt: raw?.roundStartedAt ?? null,
     roundEndsAt: raw?.roundEndsAt ?? null,
     hostUpdatedAt: raw?.hostUpdatedAt ?? null,
+    updatedAt: raw?.updatedAt ?? null,
+    createdAt: raw?.createdAt ?? null,
     cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 3,
     cooldownEndsAt: raw?.cooldownEndsAt ?? null,
     cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
+    presence: raw?.presence && typeof raw.presence === "object" ? raw.presence : {},
     teams: safeTeams.map((team) => ({
       id: Number(team.id),
       name: String(team.name || "فريق"),
@@ -343,6 +365,14 @@ async function syncHostSettings() {
   }
 }
 
+function getPlayersByTeam(session, teamId) {
+  const presenceEntries = Object.values(session.presence || {});
+  return presenceEntries
+    .filter((item) => Number(item?.teamId) === Number(teamId))
+    .map((item) => sanitizeName(item?.name || "لاعب"))
+    .filter(Boolean);
+}
+
 function renderSession(session) {
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
@@ -374,12 +404,6 @@ function renderSession(session) {
     els.timerStatusBadge.className = `state-badge ${
       session.timerRunning ? "green" : ""
     }`.trim();
-  }
-
-  if (els.toggleTimerBtn) {
-    els.toggleTimerBtn.textContent = session.timerRunning
-      ? "إيقاف المؤقت"
-      : "تشغيل المؤقت";
   }
 
   if (els.lockStatusBadge) {
@@ -419,11 +443,13 @@ function renderSession(session) {
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;
 
     if (amIWinner) {
-      els.deviceBuzzBtn.style.background = "#22c55e";
+      els.deviceBuzzBtn.style.background =
+        "linear-gradient(135deg, #22c55e, #16a34a)";
     } else if (isMyCooldownActive(session)) {
-      els.deviceBuzzBtn.style.background = "#64748b";
+      els.deviceBuzzBtn.style.background =
+        "linear-gradient(135deg, #64748b, #475569)";
     } else {
-      els.deviceBuzzBtn.style.background = "#ef4444";
+      els.deviceBuzzBtn.style.background = "";
     }
   }
 
@@ -470,6 +496,7 @@ function renderHostBuzzButtons(session) {
 
   session.teams.forEach((team) => {
     const isWinner = session.winnerTeamId === team.id;
+    const players = getPlayersByTeam(session, team.id);
 
     const button = document.createElement("button");
     button.className = `team-buzz-btn ${team.colorClass}`;
@@ -478,11 +505,24 @@ function renderHostBuzzButtons(session) {
     button.innerHTML = `
       <div class="team-buzz-top">
         <span class="team-buzz-name">${escapeHtml(team.name)}</span>
-        <span>${isWinner ? "✅" : "🔔"}</span>
       </div>
-      <div class="team-buzz-note">${
-        isWinner ? "هذا هو الفريق الذي ضغط أولاً" : "ضغط تجريبي من شاشة المشرف"
-      }</div>
+      <div class="team-buzz-players">
+        ${
+          players.length
+            ? players
+                .map(
+                  (player) =>
+                    `<span class="team-player-chip">${escapeHtml(player)}</span>`,
+                )
+                .join("")
+            : `<span class="team-player-chip muted-chip">لا يوجد لاعبين</span>`
+        }
+      </div>
+      ${
+        isWinner
+          ? `<div class="team-winner-indicator">الفريق الفائز الحالي</div>`
+          : ""
+      }
     `;
 
     button.addEventListener("click", () => {
@@ -499,11 +539,38 @@ function renderHostBuzzButtons(session) {
 function renderTeamManager(session) {
   if (!els.teamManageList) return;
 
+  const renderKey = JSON.stringify(
+    session.teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      points: team.points,
+      colorClass: team.colorClass,
+    })),
+  );
+
+  if (local.lastTeamsRenderKey === renderKey) return;
+  local.lastTeamsRenderKey = renderKey;
+
   els.teamManageList.innerHTML = "";
 
   session.teams.forEach((team) => {
     const row = document.createElement("div");
-    row.className = "team-manage-row";
+    row.className = "team-manage-row modern-team-row";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "icon-trash-btn";
+    removeBtn.type = "button";
+    removeBtn.title = "حذف الفريق";
+    removeBtn.innerHTML = `<img src="media/delete.png" alt="حذف" class="trash-icon-img" />`;
+
+    removeBtn.addEventListener("click", async () => {
+      try {
+        await removeTeam(team.id);
+      } catch (error) {
+        console.error(error);
+        showToast("تعذر حذف الفريق", true);
+      }
+    });
 
     const input = document.createElement("input");
     input.className = "input";
@@ -520,27 +587,50 @@ function renderTeamManager(session) {
       }
     });
 
+    const scoreWrap = document.createElement("div");
+    scoreWrap.className = "score-control-wrap";
+
+    const plusBtn = document.createElement("button");
+    plusBtn.className = "score-icon-btn";
+    plusBtn.type = "button";
+    plusBtn.textContent = "+";
+    plusBtn.title = "زيادة نقطة";
+
+    plusBtn.addEventListener("click", async () => {
+      try {
+        await changeTeamPoints(team.id, 1);
+      } catch (error) {
+        console.error(error);
+        showToast("تعذر زيادة النقاط", true);
+      }
+    });
+
     const score = document.createElement("div");
     score.className = "score-box";
     score.textContent = String(team.points);
 
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "btn ghost";
-    removeBtn.type = "button";
-    removeBtn.textContent = "حذف";
+    const minusBtn = document.createElement("button");
+    minusBtn.className = "score-icon-btn";
+    minusBtn.type = "button";
+    minusBtn.textContent = "−";
+    minusBtn.title = "نقصان نقطة";
 
-    removeBtn.addEventListener("click", async () => {
+    minusBtn.addEventListener("click", async () => {
       try {
-        await removeTeam(team.id);
+        await changeTeamPoints(team.id, -1);
       } catch (error) {
         console.error(error);
-        showToast("تعذر حذف الفريق", true);
+        showToast("تعذر إنقاص النقاط", true);
       }
     });
 
-    row.appendChild(input);
-    row.appendChild(score);
+    scoreWrap.appendChild(plusBtn);
+    scoreWrap.appendChild(score);
+    scoreWrap.appendChild(minusBtn);
+
     row.appendChild(removeBtn);
+    row.appendChild(input);
+    row.appendChild(scoreWrap);
 
     els.teamManageList.appendChild(row);
   });
@@ -633,6 +723,8 @@ async function attachPresence(code) {
 
 async function subscribeToSession(code) {
   local.currentSessionCode = code;
+  local.lastQrCodeValue = "";
+  local.lastTeamsRenderKey = "";
 
   if (typeof local.unsubscribeSession === "function") {
     local.unsubscribeSession();
@@ -704,27 +796,6 @@ async function resetToFreshRound(session, extraPatch = {}) {
   });
 }
 
-async function toggleTimer() {
-  const session = await readCurrentSession();
-
-  if (session.timeLeft <= 0) return;
-
-  if (session.timerRunning) {
-    await updateSessionPatch({
-      timerRunning: false,
-      roundEndsAt: null,
-      hostUpdatedAt: Date.now(),
-    });
-  } else {
-    await updateSessionPatch({
-      timerRunning: true,
-      roundStartedAt: Date.now(),
-      roundEndsAt: Date.now() + session.timeLeft * 1000,
-      hostUpdatedAt: Date.now(),
-    });
-  }
-}
-
 async function toggleLock() {
   const session = await readCurrentSession();
 
@@ -743,22 +814,13 @@ async function clearWinner() {
   });
 }
 
-async function moveWinnerToCooldown() {
+async function openAllForPlayers() {
   const session = await readCurrentSession();
 
-  if (!session.winnerPlayerId) {
-    await resetToFreshRound(session);
-    return;
-  }
-
   await resetToFreshRound(session, {
-    cooldownPlayerId: session.winnerPlayerId,
-    cooldownEndsAt: Date.now() + session.cooldown * 1000,
+    cooldownPlayerId: "",
+    cooldownEndsAt: null,
   });
-}
-
-async function openAllForPlayers() {
-  await moveWinnerToCooldown();
 }
 
 async function claimBuzz(teamId, playerName = "") {
@@ -800,11 +862,8 @@ async function claimBuzz(teamId, playerName = "") {
       timerRunning: true,
       roundStartedAt: Date.now(),
       roundEndsAt: Date.now() + safe.timeLeft * 1000,
-
-      // إلغاء منع اللاعب السابق مباشرة عند وجود فائز جديد
       cooldownPlayerId: "",
       cooldownEndsAt: null,
-
       hostUpdatedAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -832,13 +891,12 @@ async function addPoint() {
   });
 }
 
-async function removePoint() {
+async function changeTeamPoints(teamId, amount) {
   const session = await readCurrentSession();
-  if (session.winnerTeamId == null) return;
 
   const teams = session.teams.map((team) =>
-    team.id === session.winnerTeamId
-      ? { ...team, points: Math.max(0, Number(team.points || 0) - 1) }
+    team.id === teamId
+      ? { ...team, points: Math.max(0, Number(team.points || 0) + amount) }
       : team,
   );
 
@@ -854,8 +912,16 @@ async function addTeam() {
 
   const session = await readCurrentSession();
   const nextId = Date.now();
+
+  const usedColors = session.teams.map((team) => team.colorClass);
+  const availableColors = TEAM_COLORS.filter(
+    (color) => !usedColors.includes(color),
+  );
+
   const colorClass =
-    TEAM_COLORS[session.teams.length % TEAM_COLORS.length] || "team-slate";
+    availableColors.length > 0
+      ? availableColors[0]
+      : TEAM_COLORS[session.teams.length % TEAM_COLORS.length];
 
   const teams = [...session.teams, { id: nextId, name, colorClass, points: 0 }];
 
@@ -940,11 +1006,49 @@ async function copyText(text, successMessage) {
   }
 }
 
+async function cleanupInactiveSession() {
+  if (pageType !== "host" || !local.currentSessionCode) return;
+
+  try {
+    const snapshot = await get(sessionRef(local.currentSessionCode));
+    if (!snapshot.exists()) return;
+
+    const session = normalizeSession(snapshot.val(), local.currentSessionCode);
+    const presenceValues = Object.values(session.presence || {});
+    const now = Date.now();
+
+    const activePlayers = presenceValues.filter(
+      (player) => now - Number(player?.at || 0) < 30000,
+    );
+
+    const lastActivity = Math.max(
+      Number(session.updatedAt || 0),
+      Number(session.hostUpdatedAt || 0),
+      Number(session.winnerPressedAt || 0),
+      Number(session.createdAt || 0),
+      ...presenceValues.map((p) => Number(p?.at || 0)),
+    );
+
+    const sessionIsIdle = now - lastActivity > 60000;
+
+    if (activePlayers.length === 0 && sessionIsIdle) {
+      await set(sessionRef(local.currentSessionCode), null);
+      local.currentSessionCode = "";
+      local.lastSession = null;
+      showToast("تم حذف الجلسة غير النشطة");
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 async function startTickWorker() {
   if (pageType !== "host") return;
 
   setInterval(async () => {
     try {
+      await cleanupInactiveSession();
+
       if (!local.currentSessionCode) return;
 
       const snapshot = await get(sessionRef(local.currentSessionCode));
@@ -1002,6 +1106,59 @@ async function startTickWorker() {
   }, 500);
 }
 
+function bindHomeEvents() {
+  if (els.createSessionBtn) {
+    els.createSessionBtn.addEventListener("click", () => {
+      const code = randomCode();
+      window.location.href = `host.html?session=${encodeURIComponent(code)}`;
+    });
+  }
+
+  if (els.joinCodeInput) {
+    els.joinCodeInput.addEventListener("input", () => {
+      hideJoinError();
+    });
+
+    els.joinCodeInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        els.joinSessionBtn?.click();
+      }
+    });
+  }
+
+  if (els.joinSessionBtn) {
+    els.joinSessionBtn.addEventListener("click", async () => {
+      const code = String(els.joinCodeInput?.value || "")
+        .trim()
+        .toUpperCase();
+
+      hideJoinError();
+
+      if (!code) {
+        showJoinError("اكتب كود الجلسة أولاً");
+        els.joinCodeInput?.focus();
+        return;
+      }
+
+      try {
+        const snapshot = await get(sessionRef(code));
+
+        if (!snapshot.exists()) {
+          showJoinError("كود الجلسة غير صحيح أو الجلسة غير موجودة");
+          els.joinCodeInput?.focus();
+          return;
+        }
+
+        window.location.href = `player.html?session=${encodeURIComponent(code)}`;
+      } catch (error) {
+        console.error(error);
+        showJoinError("تعذر التحقق من كود الجلسة");
+      }
+    });
+  }
+}
+
 function bindHostEvents() {
   if (els.createSessionBtn) {
     els.createSessionBtn.addEventListener("click", async () => {
@@ -1027,17 +1184,6 @@ function bindHostEvents() {
     els.copyJoinBtn.addEventListener("click", () =>
       copyText(getPlayerJoinUrl(), "تم نسخ رابط الدخول"),
     );
-  }
-
-  if (els.toggleTimerBtn) {
-    els.toggleTimerBtn.addEventListener("click", async () => {
-      try {
-        await toggleTimer();
-      } catch (error) {
-        console.error(error);
-        showToast("تعذر تغيير حالة المؤقت", true);
-      }
-    });
   }
 
   if (els.openAllBtn) {
@@ -1080,17 +1226,6 @@ function bindHostEvents() {
       } catch (error) {
         console.error(error);
         showToast("تعذر إضافة النقطة", true);
-      }
-    });
-  }
-
-  if (els.removePointBtn) {
-    els.removePointBtn.addEventListener("click", async () => {
-      try {
-        await removePoint();
-      } catch (error) {
-        console.error(error);
-        showToast("تعذر حذف النقطة", true);
       }
     });
   }
@@ -1200,14 +1335,16 @@ function bindPlayerEvents() {
 }
 
 function bindEvents() {
+  if (pageType === "home") bindHomeEvents();
   if (pageType === "host") bindHostEvents();
   if (pageType === "player") bindPlayerEvents();
 }
 
 async function boot() {
+  bindEvents();
+
   if (pageType === "home") return;
 
-  bindEvents();
   loadPlayerDraft();
   startUiTicker();
   await startTickWorker();

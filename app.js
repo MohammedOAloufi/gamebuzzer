@@ -34,6 +34,13 @@ const TEAM_COLORS = [
   "team-cyan",
 ];
 
+// إعدادات النشاط والخمول
+const PLAYER_ACTIVE_WINDOW_MS = 120000; // اللاعب يعتبر نشطًا خلال آخر دقيقتين
+const SESSION_IDLE_DELETE_MS = 600000; // حذف الجلسة بعد 10 دقائق من الخمول
+const PLAYER_HEARTBEAT_MS = 15000; // تحديث نشاط اللاعب كل 15 ثانية
+const HOST_HEARTBEAT_MS = 20000; // تحديث نشاط المشرف كل 20 ثانية
+const SESSION_EXPIRY_MS = 600000; // انتهاء صلاحية الجلسة بعد 10 دقائق
+
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
@@ -52,6 +59,8 @@ const local = {
   uiTickerStarted: false,
   lastQrCodeValue: "",
   lastTeamsRenderKey: "",
+  playerHeartbeat: null,
+  hostHeartbeat: null,
 };
 
 const els = {
@@ -206,6 +215,7 @@ function normalizeSession(raw, code) {
   const parsedTimeLeft = Number(raw?.timeLeft);
   const parsedMaxTime = Number(raw?.maxTime);
   const parsedCooldown = Number(raw?.cooldown);
+  const parsedExpiresAt = Number(raw?.expiresAt);
 
   return {
     code,
@@ -225,6 +235,7 @@ function normalizeSession(raw, code) {
     hostUpdatedAt: raw?.hostUpdatedAt ?? null,
     updatedAt: raw?.updatedAt ?? null,
     createdAt: raw?.createdAt ?? null,
+    expiresAt: Number.isFinite(parsedExpiresAt) ? parsedExpiresAt : null,
     cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 3,
     cooldownEndsAt: raw?.cooldownEndsAt ?? null,
     cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
@@ -387,8 +398,7 @@ function renderSession(session) {
 
   if (els.timeLeftText) els.timeLeftText.textContent = String(session.timeLeft);
   if (els.timerBig) els.timerBig.textContent = String(session.timeLeft);
-  if (els.answerTimeBig)
-    els.answerTimeBig.textContent = String(session.timeLeft);
+  if (els.answerTimeBig) els.answerTimeBig.textContent = String(session.timeLeft);
   if (els.cooldownTimeLeft) {
     els.cooldownTimeLeft.textContent = String(getCooldownSecondsLeft(session));
   }
@@ -398,25 +408,19 @@ function renderSession(session) {
   }
 
   if (els.timerStatusBadge) {
-    els.timerStatusBadge.textContent = session.timerRunning
-      ? "الوقت يعمل"
-      : "متوقف";
+    els.timerStatusBadge.textContent = session.timerRunning ? "الوقت يعمل" : "متوقف";
     els.timerStatusBadge.className = `state-badge ${
       session.timerRunning ? "green" : ""
     }`.trim();
   }
 
   if (els.lockStatusBadge) {
-    els.lockStatusBadge.textContent = session.locked
-      ? "الأزرار مقفلة"
-      : "الأزرار مفتوحة";
+    els.lockStatusBadge.textContent = session.locked ? "الأزرار مقفلة" : "الأزرار مفتوحة";
     els.lockStatusBadge.className = `state-badge ${session.locked ? "red" : "green"}`;
   }
 
   if (els.toggleLockBtn) {
-    els.toggleLockBtn.textContent = session.locked
-      ? "فتح الأزرار"
-      : "قفل الأزرار";
+    els.toggleLockBtn.textContent = session.locked ? "فتح الأزرار" : "قفل الأزرار";
   }
 
   if (
@@ -454,9 +458,7 @@ function renderSession(session) {
   }
 
   if (els.connectionBadge) {
-    els.connectionBadge.textContent = local.joinedPlayer
-      ? "متصل"
-      : "بانتظار الانضمام";
+    els.connectionBadge.textContent = local.joinedPlayer ? "متصل" : "بانتظار الانضمام";
     els.connectionBadge.className =
       `state-badge ${local.joinedPlayer ? "green" : ""}`.trim();
   }
@@ -672,6 +674,21 @@ function renderPlayerTeam(session) {
   els.deviceTeamName.textContent = selected ? selected.name : "-";
 }
 
+async function deleteSessionIfExpired(code) {
+  const snapshot = await get(sessionRef(code));
+  if (!snapshot.exists()) return false;
+
+  const data = snapshot.val();
+  const expiresAt = Number(data?.expiresAt || 0);
+
+  if (expiresAt && Date.now() > expiresAt) {
+    await set(sessionRef(code), null);
+    return true;
+  }
+
+  return false;
+}
+
 async function ensureSession(code) {
   const codeClean = String(code || "")
     .trim()
@@ -698,10 +715,21 @@ async function ensureSession(code) {
       cooldownPlayerId: "",
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      hostUpdatedAt: Date.now(),
+      expiresAt: Date.now() + SESSION_EXPIRY_MS,
     });
   }
 
   return codeClean;
+}
+
+async function refreshSessionExpiry() {
+  if (!local.currentSessionCode) return;
+
+  await update(sessionRef(local.currentSessionCode), {
+    expiresAt: Date.now() + SESSION_EXPIRY_MS,
+    updatedAt: Date.now(),
+  });
 }
 
 async function attachPresence(code) {
@@ -718,7 +746,69 @@ async function attachPresence(code) {
     userAgent: navigator.userAgent,
   });
 
+  await update(sessionRef(code), {
+    updatedAt: Date.now(),
+    expiresAt: Date.now() + SESSION_EXPIRY_MS,
+  });
+
   onDisconnect(pRef).remove();
+}
+
+function stopPlayerHeartbeat() {
+  if (local.playerHeartbeat) {
+    clearInterval(local.playerHeartbeat);
+    local.playerHeartbeat = null;
+  }
+}
+
+function startPresenceHeartbeat() {
+  if (pageType !== "player") return;
+
+  stopPlayerHeartbeat();
+
+  local.playerHeartbeat = setInterval(async () => {
+    try {
+      if (!local.currentSessionCode || !local.joinedPlayer) return;
+
+      await update(presenceRef(local.currentSessionCode), {
+        name: getCurrentPlayerName(),
+        teamId: getSelectedTeamId(),
+        at: Date.now(),
+        userAgent: navigator.userAgent,
+      });
+
+      await refreshSessionExpiry();
+    } catch (error) {
+      console.error("Presence heartbeat error:", error);
+    }
+  }, PLAYER_HEARTBEAT_MS);
+}
+
+function stopHostHeartbeat() {
+  if (local.hostHeartbeat) {
+    clearInterval(local.hostHeartbeat);
+    local.hostHeartbeat = null;
+  }
+}
+
+function startHostHeartbeat() {
+  if (pageType !== "host") return;
+
+  stopHostHeartbeat();
+
+  local.hostHeartbeat = setInterval(async () => {
+    try {
+      if (!local.currentSessionCode) return;
+
+      await update(sessionRef(local.currentSessionCode), {
+        hostUpdatedAt: Date.now(),
+        updatedAt: Date.now(),
+        expiresAt: Date.now() + SESSION_EXPIRY_MS,
+      });
+    } catch (error) {
+      console.error("Host heartbeat error:", error);
+    }
+  }, HOST_HEARTBEAT_MS);
 }
 
 async function subscribeToSession(code) {
@@ -758,7 +848,18 @@ async function subscribeToSession(code) {
 
 async function createOrLoadSession(code = randomCode()) {
   const readyCode = await ensureSession(code);
+
+  const wasDeleted = await deleteSessionIfExpired(readyCode);
+  if (wasDeleted) {
+    throw new Error("الجلسة كانت منتهية وتم حذفها");
+  }
+
   await subscribeToSession(readyCode);
+
+  if (pageType === "host") {
+    startHostHeartbeat();
+  }
+
   showToast("تم تجهيز الجلسة");
 }
 
@@ -777,6 +878,7 @@ async function updateSessionPatch(patch) {
   await update(sessionRef(local.currentSessionCode), {
     ...patch,
     updatedAt: Date.now(),
+    expiresAt: Date.now() + SESSION_EXPIRY_MS,
   });
 }
 
@@ -866,6 +968,7 @@ async function claimBuzz(teamId, playerName = "") {
       cooldownEndsAt: null,
       hostUpdatedAt: Date.now(),
       updatedAt: Date.now(),
+      expiresAt: Date.now() + SESSION_EXPIRY_MS,
     };
   });
 
@@ -1018,7 +1121,7 @@ async function cleanupInactiveSession() {
     const now = Date.now();
 
     const activePlayers = presenceValues.filter(
-      (player) => now - Number(player?.at || 0) < 30000,
+      (player) => now - Number(player?.at || 0) < PLAYER_ACTIVE_WINDOW_MS,
     );
 
     const lastActivity = Math.max(
@@ -1029,12 +1132,15 @@ async function cleanupInactiveSession() {
       ...presenceValues.map((p) => Number(p?.at || 0)),
     );
 
-    const sessionIsIdle = now - lastActivity > 60000;
+    const sessionIsIdle = now - lastActivity > SESSION_IDLE_DELETE_MS;
+    const sessionExpired =
+      Boolean(session.expiresAt) && now > Number(session.expiresAt);
 
-    if (activePlayers.length === 0 && sessionIsIdle) {
+    if ((activePlayers.length === 0 && sessionIsIdle) || sessionExpired) {
       await set(sessionRef(local.currentSessionCode), null);
       local.currentSessionCode = "";
       local.lastSession = null;
+      stopHostHeartbeat();
       showToast("تم حذف الجلسة غير النشطة");
     }
   } catch (error) {
@@ -1058,6 +1164,7 @@ async function startTickWorker() {
         snapshot.val(),
         local.currentSessionCode,
       );
+
       if (!session.timerRunning || !session.roundEndsAt) return;
 
       const leftMs = Number(session.roundEndsAt) - Date.now();
@@ -1067,6 +1174,7 @@ async function startTickWorker() {
         await update(sessionRef(local.currentSessionCode), {
           timeLeft: nextLeft,
           updatedAt: Date.now(),
+          expiresAt: Date.now() + SESSION_EXPIRY_MS,
         });
         return;
       }
@@ -1086,6 +1194,8 @@ async function startTickWorker() {
             winnerPlayerId: "",
             winnerPressedAt: null,
             updatedAt: Date.now(),
+            hostUpdatedAt: Date.now(),
+            expiresAt: Date.now() + SESSION_EXPIRY_MS,
           });
         } else {
           await update(sessionRef(local.currentSessionCode), {
@@ -1097,6 +1207,8 @@ async function startTickWorker() {
             cooldownPlayerId: "",
             cooldownEndsAt: null,
             updatedAt: Date.now(),
+            hostUpdatedAt: Date.now(),
+            expiresAt: Date.now() + SESSION_EXPIRY_MS,
           });
         }
       }
@@ -1142,6 +1254,14 @@ function bindHomeEvents() {
       }
 
       try {
+        const wasDeleted = await deleteSessionIfExpired(code);
+
+        if (wasDeleted) {
+          showJoinError("هذه الجلسة انتهت وتم حذفها");
+          els.joinCodeInput?.focus();
+          return;
+        }
+
         const snapshot = await get(sessionRef(code));
 
         if (!snapshot.exists()) {
@@ -1266,6 +1386,11 @@ function bindPlayerEvents() {
     els.selectedTeam.addEventListener("change", async () => {
       try {
         savePlayerDraft();
+
+        if (local.joinedPlayer && local.currentSessionCode) {
+          await attachPresence(local.currentSessionCode);
+        }
+
         const session = await readCurrentSession();
         renderPlayerTeam(session);
       } catch (error) {
@@ -1275,8 +1400,16 @@ function bindPlayerEvents() {
   }
 
   if (els.deviceName) {
-    els.deviceName.addEventListener("input", () => {
+    els.deviceName.addEventListener("input", async () => {
       savePlayerDraft();
+
+      if (local.joinedPlayer && local.currentSessionCode) {
+        try {
+          await attachPresence(local.currentSessionCode);
+        } catch (error) {
+          console.error(error);
+        }
+      }
     });
   }
 
@@ -1300,6 +1433,8 @@ function bindPlayerEvents() {
         savePlayerDraft();
         showPlayerBuzzerView();
         await attachPresence(local.currentSessionCode);
+        startPresenceHeartbeat();
+
         const session = await readCurrentSession();
         renderPlayerTeam(session);
         showToast("تم الانضمام");
@@ -1340,8 +1475,36 @@ function bindEvents() {
   if (pageType === "player") bindPlayerEvents();
 }
 
+function bindVisibilityEvents() {
+  document.addEventListener("visibilitychange", async () => {
+    try {
+      if (document.hidden) return;
+
+      if (pageType === "host" && local.currentSessionCode) {
+        await update(sessionRef(local.currentSessionCode), {
+          hostUpdatedAt: Date.now(),
+          updatedAt: Date.now(),
+          expiresAt: Date.now() + SESSION_EXPIRY_MS,
+        });
+      }
+
+      if (pageType === "player" && local.currentSessionCode && local.joinedPlayer) {
+        await attachPresence(local.currentSessionCode);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  window.addEventListener("beforeunload", () => {
+    stopPlayerHeartbeat();
+    stopHostHeartbeat();
+  });
+}
+
 async function boot() {
   bindEvents();
+  bindVisibilityEvents();
 
   if (pageType === "home") return;
 
@@ -1356,6 +1519,12 @@ async function boot() {
 
   if (!cleanCode) {
     showToast("لا يوجد كود جلسة في الرابط", true);
+    return;
+  }
+
+  const wasDeleted = await deleteSessionIfExpired(cleanCode);
+  if (wasDeleted) {
+    showToast("هذه الجلسة انتهت وتم حذفها", true);
     return;
   }
 

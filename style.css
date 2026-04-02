@@ -981,6 +981,7 @@ select {
 .home-actions {
   width: 100%;
   justify-content: center;
+  margin-top: 14px;
 }
 
 .home-main-btn {

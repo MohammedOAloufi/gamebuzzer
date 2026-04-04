@@ -12,9 +12,7 @@
       <div class="card player-join-card" id="joinView">
         <div class="card-header player-join-header">
           <h2 class="card-title">الانضمام إلى الجلسة</h2>
-          <p class="card-desc">
-            اختر اسمك وفريقك ثم اضغط انضمام
-          </p>
+          <p class="card-desc">اختر اسمك وفريقك ثم اضغط انضمام</p>
         </div>
 
         <div class="card-content player-join-content">
@@ -60,35 +58,48 @@
         </div>
 
         <div class="card-content player-buzzer-content">
-          <div class="player-mini-session">
-            <div class="connected-label">كود الجلسة</div>
-            <div class="compact-session-code" id="miniSessionCode">------</div>
-          </div>
-
-          <button class="big-buzz player-main-buzz" id="deviceBuzzBtn">
-            اضغط
-          </button>
-
-          <div class="player-answer-time-box">
-            <div class="player-answer-label">وقت الإجابة</div>
-            <div class="player-answer-value">
-              <span id="answerTimeBig">3</span>
-              <span class="answer-time-unit">ث</span>
+          <div class="player-top-meta">
+            <div class="player-mini-session">
+              <div class="connected-label">كود الجلسة</div>
+              <div class="compact-session-code" id="miniSessionCode">------</div>
             </div>
           </div>
 
-          <div class="player-bottom-stats">
-            <div class="stat-box player-stat-box">
-              <div class="stat-label">وقت المنع</div>
-              <div class="stat-value">
-                <span id="cooldownTimeLeft">0</span> ث
+          <div class="player-main-layout">
+            <div class="player-answer-time-box player-answer-large">
+              <div class="player-answer-label">وقت الإجابة</div>
+              <div class="player-answer-value">
+                <span id="answerTimeBig">3</span>
+                <span class="answer-time-unit">ث</span>
               </div>
             </div>
 
-            <div class="stat-box player-stat-box">
-              <div class="stat-label">الفريق</div>
-              <div class="stat-value" id="deviceTeamName">-</div>
+            <div class="player-side-stats">
+              <div class="stat-box player-stat-box player-cooldown-box">
+                <div class="stat-label">وقت المنع</div>
+                <div class="stat-value">
+                  <span id="cooldownTimeLeft">0</span> ث
+                </div>
+              </div>
+
+              <div class="player-small-stats-row">
+                <div class="stat-box player-stat-box player-compact-stat">
+                  <div class="stat-label">الفريق</div>
+                  <div class="stat-value" id="deviceTeamName">-</div>
+                </div>
+
+                <div class="stat-box player-stat-box player-compact-stat player-points-box">
+                  <div class="stat-label">نقاط الفريق</div>
+                  <div class="stat-value" id="deviceTeamPoints">0</div>
+                </div>
+              </div>
             </div>
+          </div>
+
+          <div class="player-buzz-wrap">
+            <button class="big-buzz player-main-buzz" id="deviceBuzzBtn">
+              اضغط
+            </button>
           </div>
         </div>
       </div>

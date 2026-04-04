@@ -35,11 +35,11 @@ const TEAM_COLORS = [
 ];
 
 // إعدادات النشاط والخمول
-const PLAYER_ACTIVE_WINDOW_MS = 120000; // اللاعب يعتبر نشطًا خلال آخر دقيقتين
-const SESSION_IDLE_DELETE_MS = 600000; // حذف الجلسة بعد 10 دقائق من الخمول
-const PLAYER_HEARTBEAT_MS = 15000; // تحديث نشاط اللاعب كل 15 ثانية
-const HOST_HEARTBEAT_MS = 20000; // تحديث نشاط المشرف كل 20 ثانية
-const SESSION_EXPIRY_MS = 600000; // انتهاء صلاحية الجلسة بعد 10 دقائق
+const PLAYER_ACTIVE_WINDOW_MS = 120000;
+const SESSION_IDLE_DELETE_MS = 600000;
+const PLAYER_HEARTBEAT_MS = 15000;
+const HOST_HEARTBEAT_MS = 20000;
+const SESSION_EXPIRY_MS = 600000;
 
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
@@ -101,6 +101,7 @@ const els = {
   deviceName: document.getElementById("deviceName"),
   deviceBuzzBtn: document.getElementById("deviceBuzzBtn"),
   deviceTeamName: document.getElementById("deviceTeamName"),
+  deviceTeamPoints: document.getElementById("deviceTeamPoints"),
   connectionBadge: document.getElementById("connectionBadge"),
   answerTimeBig: document.getElementById("answerTimeBig"),
   cooldownTimeLeft: document.getElementById("cooldownTimeLeft"),
@@ -669,9 +670,17 @@ function renderTeamSelect(session) {
 }
 
 function renderPlayerTeam(session) {
-  if (!els.deviceTeamName) return;
   const selected = getSelectedTeam(session);
-  els.deviceTeamName.textContent = selected ? selected.name : "-";
+
+  if (els.deviceTeamName) {
+    els.deviceTeamName.textContent = selected ? selected.name : "-";
+  }
+
+  if (els.deviceTeamPoints) {
+    els.deviceTeamPoints.textContent = selected
+      ? String(Number(selected.points || 0))
+      : "0";
+  }
 }
 
 async function deleteSessionIfExpired(code) {

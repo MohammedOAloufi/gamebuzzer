@@ -34,7 +34,6 @@ const TEAM_COLORS = [
   "team-cyan",
 ];
 
-// إعدادات النشاط والخمول
 const PLAYER_ACTIVE_WINDOW_MS = 120000;
 const SESSION_IDLE_DELETE_MS = 600000;
 const PLAYER_HEARTBEAT_MS = 15000;
@@ -44,7 +43,8 @@ const SESSION_EXPIRY_MS = 600000;
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
-  if (path.endsWith("/player.html") || path.includes("player.html")) return "player";
+  if (path.endsWith("/player.html") || path.includes("player.html"))
+    return "player";
   return "home";
 })();
 
@@ -55,6 +55,8 @@ const local = {
     ? crypto.randomUUID()
     : `device-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   joinedPlayer: false,
+  playerTeamId: null,
+  playerName: "",
   lastSession: null,
   uiTickerStarted: false,
   lastQrCodeValue: "",
@@ -222,6 +224,7 @@ function normalizeSession(raw, code) {
     code,
     locked: Boolean(raw?.locked),
     timerRunning: Boolean(raw?.timerRunning),
+    answerExpired: Boolean(raw?.answerExpired),
     timeLeft: Number.isFinite(parsedTimeLeft) ? parsedTimeLeft : 3,
     maxTime: Number.isFinite(parsedMaxTime) ? parsedMaxTime : 3,
     winnerTeamId:
@@ -240,7 +243,8 @@ function normalizeSession(raw, code) {
     cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 3,
     cooldownEndsAt: raw?.cooldownEndsAt ?? null,
     cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
-    presence: raw?.presence && typeof raw.presence === "object" ? raw.presence : {},
+    presence:
+      raw?.presence && typeof raw.presence === "object" ? raw.presence : {},
     teams: safeTeams.map((team) => ({
       id: Number(team.id),
       name: String(team.name || "فريق"),
@@ -255,6 +259,10 @@ function getWinnerTeam(session) {
 }
 
 function getSelectedTeamId() {
+  if (local.joinedPlayer && Number.isFinite(local.playerTeamId)) {
+    return Number(local.playerTeamId);
+  }
+
   if (!els.selectedTeam) return null;
   return Number(els.selectedTeam.value);
 }
@@ -265,6 +273,10 @@ function getSelectedTeam(session) {
 }
 
 function getCurrentPlayerName() {
+  if (local.joinedPlayer && local.playerName) {
+    return local.playerName;
+  }
+
   return sanitizeName(els.deviceName?.value) || "لاعب";
 }
 
@@ -281,9 +293,14 @@ function canBuzz(session) {
   return (
     local.joinedPlayer &&
     !session.locked &&
-    session.winnerTeamId === null &&
-    session.timeLeft > 0 &&
+    (session.winnerTeamId === null || session.answerExpired) &&
     !isMyCooldownActive(session)
+  );
+}
+
+function canHostTrigger(session) {
+  return (
+    !session.locked && (session.winnerTeamId === null || session.answerExpired)
   );
 }
 
@@ -311,7 +328,7 @@ function savePlayerDraft() {
       name: sanitizeName(els.deviceName?.value),
       teamId: getSelectedTeamId(),
     };
-    localStorage.setItem("gb_player_profile", JSON.stringify(payload));
+    sessionStorage.setItem("gb_player_profile", JSON.stringify(payload));
   } catch (error) {
     console.error(error);
   }
@@ -319,7 +336,7 @@ function savePlayerDraft() {
 
 function loadPlayerDraft() {
   try {
-    const raw = localStorage.getItem("gb_player_profile");
+    const raw = sessionStorage.getItem("gb_player_profile");
     if (!raw) return;
     const data = JSON.parse(raw);
     if (els.deviceName && data?.name) els.deviceName.value = String(data.name);
@@ -367,7 +384,11 @@ async function syncHostSettings() {
       hostUpdatedAt: Date.now(),
     };
 
-    if (!session.timerRunning && session.winnerTeamId === null) {
+    if (
+      !session.timerRunning &&
+      !session.answerExpired &&
+      session.winnerTeamId === null
+    ) {
       patch.timeLeft = newMaxTime;
     }
 
@@ -389,39 +410,67 @@ function renderSession(session) {
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
   if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
-  if (els.joinUrlText)
+  if (els.joinUrlText) {
     els.joinUrlText.textContent = getPlayerJoinUrl(session.code);
+  }
 
   updateQRCode(session.code);
 
   const progress =
     session.maxTime > 0 ? (session.timeLeft / session.maxTime) * 100 : 0;
 
-  if (els.timeLeftText) els.timeLeftText.textContent = String(session.timeLeft);
-  if (els.timerBig) els.timerBig.textContent = String(session.timeLeft);
-  if (els.answerTimeBig) els.answerTimeBig.textContent = String(session.timeLeft);
+  if (els.timeLeftText) {
+    els.timeLeftText.textContent = String(session.timeLeft);
+  }
+
+  if (els.timerBig) {
+    els.timerBig.textContent = String(session.timeLeft);
+  }
+
+  if (els.answerTimeBig) {
+    els.answerTimeBig.textContent = String(session.timeLeft);
+  }
+
   if (els.cooldownTimeLeft) {
     els.cooldownTimeLeft.textContent = String(getCooldownSecondsLeft(session));
   }
 
   if (els.progressBar) {
-    els.progressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+    if (session.answerExpired) {
+      els.progressBar.style.width = "100%";
+      els.progressBar.classList.add("expired");
+    } else {
+      els.progressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+      els.progressBar.classList.remove("expired");
+    }
   }
 
   if (els.timerStatusBadge) {
-    els.timerStatusBadge.textContent = session.timerRunning ? "الوقت يعمل" : "متوقف";
-    els.timerStatusBadge.className = `state-badge ${
-      session.timerRunning ? "green" : ""
-    }`.trim();
+    if (session.answerExpired) {
+      els.timerStatusBadge.textContent = "انتهى الوقت";
+      els.timerStatusBadge.className = "state-badge gray";
+    } else {
+      els.timerStatusBadge.textContent = session.timerRunning
+        ? "الوقت يعمل"
+        : "متوقف";
+      els.timerStatusBadge.className = `state-badge ${
+        session.timerRunning ? "green" : ""
+      }`.trim();
+    }
   }
 
   if (els.lockStatusBadge) {
-    els.lockStatusBadge.textContent = session.locked ? "الأزرار مقفلة" : "الأزرار مفتوحة";
-    els.lockStatusBadge.className = `state-badge ${session.locked ? "red" : "green"}`;
+    const isOpen = !session.locked;
+    els.lockStatusBadge.textContent = isOpen
+      ? "الأزرار مفتوحة"
+      : "الأزرار مقفلة";
+    els.lockStatusBadge.className = `state-badge ${isOpen ? "green" : "red"}`;
   }
 
   if (els.toggleLockBtn) {
-    els.toggleLockBtn.textContent = session.locked ? "فتح الأزرار" : "قفل الأزرار";
+    els.toggleLockBtn.textContent = session.locked
+      ? "فتح الأزرار"
+      : "قفل الأزرار";
   }
 
   if (
@@ -447,7 +496,7 @@ function renderSession(session) {
     const amIWinner =
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;
 
-    if (amIWinner) {
+    if (amIWinner && !session.answerExpired) {
       els.deviceBuzzBtn.style.background =
         "linear-gradient(135deg, #22c55e, #16a34a)";
     } else if (isMyCooldownActive(session)) {
@@ -459,7 +508,9 @@ function renderSession(session) {
   }
 
   if (els.connectionBadge) {
-    els.connectionBadge.textContent = local.joinedPlayer ? "متصل" : "بانتظار الانضمام";
+    els.connectionBadge.textContent = local.joinedPlayer
+      ? "متصل"
+      : "بانتظار الانضمام";
     els.connectionBadge.className =
       `state-badge ${local.joinedPlayer ? "green" : ""}`.trim();
   }
@@ -480,15 +531,43 @@ function renderWinner(session) {
     els.winnerEmpty.classList.remove("hidden");
     els.winnerBox.className = "winner-box";
     els.winnerName.textContent = "-";
-    if (els.winnerTeamText) els.winnerTeamText.textContent = "الفريق: -";
+
+    if (els.winnerTeamText) {
+      els.winnerTeamText.textContent = "الفريق: -";
+    }
+
+    if (els.addPointBtn) {
+      els.addPointBtn.textContent = "إضافة نقطة";
+      els.addPointBtn.disabled = false;
+    }
+
     return;
   }
 
   els.winnerEmpty.classList.add("hidden");
-  els.winnerBox.className = `winner-box show ${winnerTeam.colorClass}`;
+
+  if (session.answerExpired) {
+    els.winnerBox.className = "winner-box show winner-box-expired";
+
+    if (els.addPointBtn) {
+      els.addPointBtn.textContent = "انتهى الوقت";
+      els.addPointBtn.disabled = true;
+    }
+  } else {
+    els.winnerBox.className = `winner-box show ${winnerTeam.colorClass}`;
+
+    if (els.addPointBtn) {
+      els.addPointBtn.textContent = "إضافة نقطة";
+      els.addPointBtn.disabled = false;
+    }
+  }
+
   els.winnerName.textContent = session.winnerPlayerName || winnerTeam.name;
+
   if (els.winnerTeamText) {
-    els.winnerTeamText.textContent = `الفريق: ${winnerTeam.name}`;
+    els.winnerTeamText.textContent = session.answerExpired
+      ? `الفريق: ${winnerTeam.name} - انتهى وقته`
+      : `الفريق: ${winnerTeam.name}`;
   }
 }
 
@@ -500,15 +579,23 @@ function renderHostBuzzButtons(session) {
   session.teams.forEach((team) => {
     const isWinner = session.winnerTeamId === team.id;
     const players = getPlayersByTeam(session, team.id);
+    const hasPlayers = players.length > 0;
 
     const button = document.createElement("button");
-    button.className = `team-buzz-btn ${team.colorClass}`;
-    button.disabled = !canBuzz(session);
+    button.className = `team-buzz-btn ${team.colorClass} ${
+      hasPlayers ? "has-players" : "no-players"
+    } ${isWinner ? "is-current-winner" : ""} ${
+      session.answerExpired && isWinner ? "expired-winner" : ""
+    }`.trim();
+
+    button.disabled = true;
 
     button.innerHTML = `
       <div class="team-buzz-top">
         <span class="team-buzz-name">${escapeHtml(team.name)}</span>
+        <span class="team-players-count">${players.length}</span>
       </div>
+
       <div class="team-buzz-players">
         ${
           players.length
@@ -521,18 +608,20 @@ function renderHostBuzzButtons(session) {
             : `<span class="team-player-chip muted-chip">لا يوجد لاعبين</span>`
         }
       </div>
+
       ${
         isWinner
-          ? `<div class="team-winner-indicator">الفريق الفائز الحالي</div>`
+          ? `<div class="team-winner-indicator">${
+              session.answerExpired
+                ? "انتهى وقت هذا الفريق"
+                : "الفريق الفائز الحالي"
+            }</div>`
           : ""
       }
     `;
 
     button.addEventListener("click", () => {
-      claimBuzz(team.id, "المشرف").catch((error) => {
-        console.error(error);
-        showToast("حدث خطأ أثناء تسجيل الضغط", true);
-      });
+      showToast("ضغط الفرق من أجهزة اللاعبين فقط", true);
     });
 
     els.hostBuzzGrid.appendChild(button);
@@ -644,7 +733,7 @@ function renderTeamSelect(session) {
 
   const storedTeamId = (() => {
     try {
-      const raw = localStorage.getItem("gb_player_profile");
+      const raw = sessionStorage.getItem("gb_player_profile");
       if (!raw) return null;
       const data = JSON.parse(raw);
       return Number(data?.teamId);
@@ -712,6 +801,7 @@ async function ensureSession(code) {
       code: codeClean,
       locked: false,
       timerRunning: false,
+      answerExpired: false,
       timeLeft: 3,
       maxTime: 3,
       winnerTeamId: null,
@@ -899,6 +989,7 @@ async function resetToFreshRound(session, extraPatch = {}) {
     winnerPressedAt: null,
     locked: false,
     timerRunning: false,
+    answerExpired: false,
     roundStartedAt: null,
     roundEndsAt: null,
     timeLeft: session.maxTime || Number(els.timeSelector?.value || 3),
@@ -954,12 +1045,9 @@ async function claimBuzz(teamId, playerName = "") {
       Boolean(safe.cooldownEndsAt) &&
       Date.now() < Number(safe.cooldownEndsAt);
 
-    if (
-      safe.locked ||
-      safe.winnerTeamId !== null ||
-      safe.timeLeft <= 0 ||
-      myCooldownActive
-    ) {
+    const blockedByWinner = safe.winnerTeamId !== null && !safe.answerExpired;
+
+    if (safe.locked || blockedByWinner || myCooldownActive) {
       return current;
     }
 
@@ -971,8 +1059,10 @@ async function claimBuzz(teamId, playerName = "") {
       winnerPressedAt: Date.now(),
       locked: true,
       timerRunning: true,
+      answerExpired: false,
       roundStartedAt: Date.now(),
-      roundEndsAt: Date.now() + safe.timeLeft * 1000,
+      roundEndsAt: Date.now() + safe.maxTime * 1000,
+      timeLeft: safe.maxTime,
       cooldownPlayerId: "",
       cooldownEndsAt: null,
       hostUpdatedAt: Date.now(),
@@ -1042,7 +1132,10 @@ async function addTeam() {
     hostUpdatedAt: Date.now(),
   });
 
-  if (els.newTeamName) els.newTeamName.value = "";
+  if (els.newTeamName) {
+    els.newTeamName.value = "";
+  }
+
   showToast("تمت إضافة الفريق");
 }
 
@@ -1067,8 +1160,10 @@ async function removeTeam(teamId) {
     patch.winnerPressedAt = null;
     patch.locked = false;
     patch.timerRunning = false;
+    patch.answerExpired = false;
     patch.roundStartedAt = null;
     patch.roundEndsAt = null;
+    patch.timeLeft = session.maxTime || 3;
   }
 
   await updateSessionPatch(patch);
@@ -1189,37 +1284,24 @@ async function startTickWorker() {
       }
 
       if (nextLeft <= 0) {
-        if (session.winnerPlayerId) {
-          await update(sessionRef(local.currentSessionCode), {
-            timeLeft: session.maxTime || 3,
-            timerRunning: false,
-            roundEndsAt: null,
-            roundStartedAt: null,
-            locked: false,
-            cooldownPlayerId: session.winnerPlayerId,
-            cooldownEndsAt: Date.now() + session.cooldown * 1000,
-            winnerTeamId: null,
-            winnerPlayerName: "",
-            winnerPlayerId: "",
-            winnerPressedAt: null,
-            updatedAt: Date.now(),
-            hostUpdatedAt: Date.now(),
-            expiresAt: Date.now() + SESSION_EXPIRY_MS,
-          });
-        } else {
-          await update(sessionRef(local.currentSessionCode), {
-            timeLeft: session.maxTime || 3,
-            timerRunning: false,
-            roundEndsAt: null,
-            roundStartedAt: null,
-            locked: false,
-            cooldownPlayerId: "",
-            cooldownEndsAt: null,
-            updatedAt: Date.now(),
-            hostUpdatedAt: Date.now(),
-            expiresAt: Date.now() + SESSION_EXPIRY_MS,
-          });
-        }
+        const cooldownEnabled = Number(session.cooldown || 0) > 0;
+
+        await update(sessionRef(local.currentSessionCode), {
+          timeLeft: session.maxTime || 3,
+          timerRunning: false,
+          answerExpired: true,
+          roundEndsAt: null,
+          roundStartedAt: null,
+          locked: false,
+          cooldownPlayerId: cooldownEnabled ? session.winnerPlayerId || "" : "",
+          cooldownEndsAt:
+            cooldownEnabled && session.winnerPlayerId
+              ? Date.now() + session.cooldown * 1000
+              : null,
+          updatedAt: Date.now(),
+          hostUpdatedAt: Date.now(),
+          expiresAt: Date.now() + SESSION_EXPIRY_MS,
+        });
       }
     } catch (error) {
       console.error(error);
@@ -1439,6 +1521,9 @@ function bindPlayerEvents() {
         }
 
         local.joinedPlayer = true;
+        local.playerTeamId = teamId;
+        local.playerName = playerName;
+
         savePlayerDraft();
         showPlayerBuzzerView();
         await attachPresence(local.currentSessionCode);
@@ -1497,7 +1582,11 @@ function bindVisibilityEvents() {
         });
       }
 
-      if (pageType === "player" && local.currentSessionCode && local.joinedPlayer) {
+      if (
+        pageType === "player" &&
+        local.currentSessionCode &&
+        local.joinedPlayer
+      ) {
         await attachPresence(local.currentSessionCode);
       }
     } catch (error) {

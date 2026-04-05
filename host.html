@@ -69,6 +69,7 @@
               <div class="field-inline">
                 <label for="cooldownSelector">مدة منع الضغط</label>
                 <select id="cooldownSelector" class="select small-select">
+                  <option value="0">إيقاف</option>
                   <option value="3">منع 3 ثواني</option>
                   <option value="5">منع 5 ثواني</option>
                   <option value="10">منع 10 ثواني</option>
@@ -118,7 +119,10 @@
               </div>
             </div>
 
-            <div class="team-buzz-grid compact-buzz-grid" id="hostBuzzGrid"></div>
+            <div
+              class="team-buzz-grid compact-buzz-grid"
+              id="hostBuzzGrid"
+            ></div>
           </div>
         </div>
 
@@ -132,7 +136,10 @@
             <div class="card-content">
               <div id="teamManageList"></div>
 
-              <div class="team-manage-row add-team-row" style="margin-top: 12px">
+              <div
+                class="team-manage-row add-team-row"
+                style="margin-top: 12px"
+              >
                 <input
                   class="input"
                   id="newTeamName"

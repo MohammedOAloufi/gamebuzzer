@@ -6,7 +6,6 @@ import {
   update,
   onValue,
   get,
-  runTransaction,
   onDisconnect,
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
@@ -43,8 +42,7 @@ const SESSION_EXPIRY_MS = 600000;
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
-  if (path.endsWith("/player.html") || path.includes("player.html"))
-    return "player";
+  if (path.endsWith("/player.html") || path.includes("player.html")) return "player";
   return "home";
 })();
 
@@ -142,6 +140,14 @@ function presenceRef(code) {
   return ref(db, `sessions/${code}/presence/${local.deviceId}`);
 }
 
+function pressesRef(code) {
+  return ref(db, `sessions/${code}/presses`);
+}
+
+function myPressRef(code) {
+  return ref(db, `sessions/${code}/presses/${local.deviceId}`);
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -220,6 +226,9 @@ function normalizeSession(raw, code) {
   const parsedCooldown = Number(raw?.cooldown);
   const parsedExpiresAt = Number(raw?.expiresAt);
 
+  const safePresses =
+    raw?.presses && typeof raw.presses === "object" ? raw.presses : {};
+
   return {
     code,
     locked: Boolean(raw?.locked),
@@ -245,6 +254,16 @@ function normalizeSession(raw, code) {
     cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
     presence:
       raw?.presence && typeof raw.presence === "object" ? raw.presence : {},
+    presses: Object.entries(safePresses).reduce((acc, [deviceId, press]) => {
+      if (!press || typeof press !== "object") return acc;
+      acc[deviceId] = {
+        deviceId,
+        teamId: Number(press.teamId),
+        playerName: String(press.playerName || ""),
+        pressedAt: Number(press.pressedAt || 0),
+      };
+      return acc;
+    }, {}),
     teams: safeTeams.map((team) => ({
       id: Number(team.id),
       name: String(team.name || "فريق"),
@@ -289,18 +308,17 @@ function isMyCooldownActive(session) {
   );
 }
 
+function hasMyPress(session) {
+  return Boolean(session.presses?.[local.deviceId]);
+}
+
 function canBuzz(session) {
   return (
     local.joinedPlayer &&
     !session.locked &&
     (session.winnerTeamId === null || session.answerExpired) &&
-    !isMyCooldownActive(session)
-  );
-}
-
-function canHostTrigger(session) {
-  return (
-    !session.locked && (session.winnerTeamId === null || session.answerExpired)
+    !isMyCooldownActive(session) &&
+    !hasMyPress(session)
   );
 }
 
@@ -326,7 +344,9 @@ function savePlayerDraft() {
   try {
     const payload = {
       name: sanitizeName(els.deviceName?.value),
-      teamId: getSelectedTeamId(),
+      teamId: local.joinedPlayer
+        ? local.playerTeamId
+        : Number(els.selectedTeam?.value || null),
     };
     sessionStorage.setItem("gb_player_profile", JSON.stringify(payload));
   } catch (error) {
@@ -404,6 +424,22 @@ function getPlayersByTeam(session, teamId) {
     .filter((item) => Number(item?.teamId) === Number(teamId))
     .map((item) => sanitizeName(item?.name || "لاعب"))
     .filter(Boolean);
+}
+
+function getSortedPresses(session) {
+  return Object.values(session.presses || {})
+    .filter(
+      (press) =>
+        Number.isFinite(press.teamId) &&
+        press.teamId > 0 &&
+        typeof press.playerName === "string" &&
+        Number.isFinite(press.pressedAt) &&
+        press.pressedAt > 0,
+    )
+    .sort((a, b) => {
+      if (a.pressedAt !== b.pressedAt) return a.pressedAt - b.pressedAt;
+      return String(a.deviceId).localeCompare(String(b.deviceId));
+    });
 }
 
 function renderSession(session) {
@@ -576,10 +612,15 @@ function renderHostBuzzButtons(session) {
 
   els.hostBuzzGrid.innerHTML = "";
 
+  const activePresses = getSortedPresses(session);
+
   session.teams.forEach((team) => {
     const isWinner = session.winnerTeamId === team.id;
     const players = getPlayersByTeam(session, team.id);
     const hasPlayers = players.length > 0;
+    const currentPress = activePresses.find(
+      (press) => Number(press.teamId) === Number(team.id),
+    );
 
     const button = document.createElement("button");
     button.className = `team-buzz-btn ${team.colorClass} ${
@@ -608,6 +649,12 @@ function renderHostBuzzButtons(session) {
             : `<span class="team-player-chip muted-chip">لا يوجد لاعبين</span>`
         }
       </div>
+
+      ${
+        currentPress && !isWinner
+          ? `<div class="team-winner-indicator">تم تسجيل ضغطة</div>`
+          : ""
+      }
 
       ${
         isWinner
@@ -809,6 +856,7 @@ async function ensureSession(code) {
       winnerPlayerId: "",
       winnerPressedAt: null,
       teams: defaultTeams(),
+      presses: null,
       cooldown: 3,
       cooldownEndsAt: null,
       cooldownPlayerId: "",
@@ -981,7 +1029,14 @@ async function updateSessionPatch(patch) {
   });
 }
 
+async function clearPresses(code = local.currentSessionCode) {
+  if (!code) return;
+  await set(pressesRef(code), null);
+}
+
 async function resetToFreshRound(session, extraPatch = {}) {
+  await clearPresses(session.code);
+
   await updateSessionPatch({
     winnerTeamId: null,
     winnerPlayerName: "",
@@ -1025,55 +1080,72 @@ async function openAllForPlayers() {
   });
 }
 
-async function claimBuzz(teamId, playerName = "") {
-  if (!local.currentSessionCode) return;
+async function registerPress(teamId, playerName = "") {
+  if (!local.currentSessionCode) return false;
 
-  const teamIdNum = Number(teamId);
-  if (!Number.isFinite(teamIdNum)) return;
+  const session = await readCurrentSession();
+
+  if (
+    session.locked ||
+    (session.winnerTeamId !== null && !session.answerExpired) ||
+    isMyCooldownActive(session) ||
+    hasMyPress(session)
+  ) {
+    return false;
+  }
 
   const safePlayerName = sanitizeName(playerName) || "لاعب";
-  const sRef = sessionRef(local.currentSessionCode);
+  const teamIdNum = Number(teamId);
 
-  const result = await runTransaction(sRef, (current) => {
-    if (!current) return current;
+  if (!Number.isFinite(teamIdNum)) return false;
 
-    const safe = normalizeSession(current, local.currentSessionCode);
-
-    const myCooldownActive =
-      Boolean(safe.cooldownPlayerId) &&
-      safe.cooldownPlayerId === local.deviceId &&
-      Boolean(safe.cooldownEndsAt) &&
-      Date.now() < Number(safe.cooldownEndsAt);
-
-    const blockedByWinner = safe.winnerTeamId !== null && !safe.answerExpired;
-
-    if (safe.locked || blockedByWinner || myCooldownActive) {
-      return current;
-    }
-
-    return {
-      ...current,
-      winnerTeamId: teamIdNum,
-      winnerPlayerName: safePlayerName,
-      winnerPlayerId: local.deviceId,
-      winnerPressedAt: Date.now(),
-      locked: true,
-      timerRunning: true,
-      answerExpired: false,
-      roundStartedAt: Date.now(),
-      roundEndsAt: Date.now() + safe.maxTime * 1000,
-      timeLeft: safe.maxTime,
-      cooldownPlayerId: "",
-      cooldownEndsAt: null,
-      hostUpdatedAt: Date.now(),
-      updatedAt: Date.now(),
-      expiresAt: Date.now() + SESSION_EXPIRY_MS,
-    };
+  await set(myPressRef(local.currentSessionCode), {
+    teamId: teamIdNum,
+    playerName: safePlayerName,
+    pressedAt: Date.now(),
   });
 
-  if (!result.committed) {
-    showToast("سبقك جهاز آخر بالضغط", true);
+  await update(sessionRef(local.currentSessionCode), {
+    updatedAt: Date.now(),
+    expiresAt: Date.now() + SESSION_EXPIRY_MS,
+  });
+
+  return true;
+}
+
+async function resolveWinnerFromPresses() {
+  if (pageType !== "host" || !local.currentSessionCode) return;
+
+  const session = await readCurrentSession();
+
+  if (session.locked || (session.winnerTeamId !== null && !session.answerExpired)) {
+    return;
   }
+
+  const presses = getSortedPresses(session);
+  if (presses.length === 0) return;
+
+  const firstPress = presses[0];
+
+  await update(sessionRef(local.currentSessionCode), {
+    winnerTeamId: Number(firstPress.teamId),
+    winnerPlayerName: String(firstPress.playerName || "لاعب"),
+    winnerPlayerId: String(firstPress.deviceId || ""),
+    winnerPressedAt: Number(firstPress.pressedAt || Date.now()),
+    locked: true,
+    timerRunning: true,
+    answerExpired: false,
+    roundStartedAt: Date.now(),
+    roundEndsAt: Date.now() + (session.maxTime || 3) * 1000,
+    timeLeft: session.maxTime || 3,
+    cooldownPlayerId: "",
+    cooldownEndsAt: null,
+    updatedAt: Date.now(),
+    hostUpdatedAt: Date.now(),
+    expiresAt: Date.now() + SESSION_EXPIRY_MS,
+  });
+
+  await clearPresses(local.currentSessionCode);
 }
 
 async function addPoint() {
@@ -1260,6 +1332,8 @@ async function startTickWorker() {
       await cleanupInactiveSession();
 
       if (!local.currentSessionCode) return;
+
+      await resolveWinnerFromPresses();
 
       const snapshot = await get(sessionRef(local.currentSessionCode));
       if (!snapshot.exists()) return;
@@ -1507,8 +1581,8 @@ function bindPlayerEvents() {
   if (els.joinPlayerBtn) {
     els.joinPlayerBtn.addEventListener("click", async () => {
       try {
-        const playerName = getCurrentPlayerName();
-        const teamId = getSelectedTeamId();
+        const playerName = sanitizeName(els.deviceName?.value) || "لاعب";
+        const teamId = Number(els.selectedTeam?.value);
 
         if (!playerName) {
           showToast("اكتب اسم اللاعب", true);
@@ -1521,8 +1595,11 @@ function bindPlayerEvents() {
         }
 
         local.joinedPlayer = true;
-        local.playerTeamId = teamId;
+        local.playerTeamId = Number(teamId);
         local.playerName = playerName;
+
+        if (els.selectedTeam) els.selectedTeam.disabled = true;
+        if (els.deviceName) els.deviceName.readOnly = true;
 
         savePlayerDraft();
         showPlayerBuzzerView();
@@ -1542,8 +1619,10 @@ function bindPlayerEvents() {
   if (els.deviceBuzzBtn) {
     els.deviceBuzzBtn.addEventListener("click", async () => {
       try {
-        const teamId = getSelectedTeamId();
-        if (!Number.isFinite(teamId)) {
+        const fixedTeamId = Number(local.playerTeamId);
+        const fixedPlayerName = local.playerName || getCurrentPlayerName();
+
+        if (!Number.isFinite(fixedTeamId)) {
           showToast("اختر الفريق أولاً", true);
           return;
         }
@@ -1554,7 +1633,11 @@ function bindPlayerEvents() {
         }
 
         await attachPresence(local.currentSessionCode);
-        await claimBuzz(teamId, getCurrentPlayerName());
+        const ok = await registerPress(fixedTeamId, fixedPlayerName);
+
+        if (!ok) {
+          showToast("تم إغلاق الجولة أو سبق أن ضغطت", true);
+        }
       } catch (error) {
         console.error(error);
         showToast("تعذر إرسال الضغط", true);

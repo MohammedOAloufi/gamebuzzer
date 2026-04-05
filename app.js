@@ -42,7 +42,9 @@ const SESSION_EXPIRY_MS = 600000;
 const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
-  if (path.endsWith("/player.html") || path.includes("player.html")) return "player";
+  if (path.endsWith("/player.html") || path.includes("player.html")) {
+    return "player";
+  }
   return "home";
 })();
 
@@ -225,6 +227,7 @@ function normalizeSession(raw, code) {
   const parsedMaxTime = Number(raw?.maxTime);
   const parsedCooldown = Number(raw?.cooldown);
   const parsedExpiresAt = Number(raw?.expiresAt);
+  const parsedRoundId = Number(raw?.roundId);
 
   const safePresses =
     raw?.presses && typeof raw.presses === "object" ? raw.presses : {};
@@ -236,6 +239,7 @@ function normalizeSession(raw, code) {
     answerExpired: Boolean(raw?.answerExpired),
     timeLeft: Number.isFinite(parsedTimeLeft) ? parsedTimeLeft : 3,
     maxTime: Number.isFinite(parsedMaxTime) ? parsedMaxTime : 3,
+    roundId: Number.isFinite(parsedRoundId) ? parsedRoundId : 1,
     winnerTeamId:
       raw?.winnerTeamId === null || raw?.winnerTeamId === undefined
         ? null
@@ -249,7 +253,7 @@ function normalizeSession(raw, code) {
     updatedAt: raw?.updatedAt ?? null,
     createdAt: raw?.createdAt ?? null,
     expiresAt: Number.isFinite(parsedExpiresAt) ? parsedExpiresAt : null,
-    cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 3,
+    cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 0,
     cooldownEndsAt: raw?.cooldownEndsAt ?? null,
     cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
     presence:
@@ -261,6 +265,7 @@ function normalizeSession(raw, code) {
         teamId: Number(press.teamId),
         playerName: String(press.playerName || ""),
         pressedAt: Number(press.pressedAt || 0),
+        roundId: Number(press.roundId || 1),
       };
       return acc;
     }, {}),
@@ -308,8 +313,9 @@ function isMyCooldownActive(session) {
   );
 }
 
-function hasMyPress(session) {
-  return Boolean(session.presses?.[local.deviceId]);
+function hasMyPressInCurrentRound(session) {
+  const myPress = session.presses?.[local.deviceId];
+  return Boolean(myPress && Number(myPress.roundId) === Number(session.roundId));
 }
 
 function canBuzz(session) {
@@ -318,7 +324,7 @@ function canBuzz(session) {
     !session.locked &&
     (session.winnerTeamId === null || session.answerExpired) &&
     !isMyCooldownActive(session) &&
-    !hasMyPress(session)
+    !hasMyPressInCurrentRound(session)
   );
 }
 
@@ -391,12 +397,12 @@ function startUiTicker() {
 }
 
 async function syncHostSettings() {
-  if (pageType !== "host" || !local.currentSessionCode) return;
+  if (!local.currentSessionCode) return;
 
   try {
     const session = await readCurrentSession();
     const newMaxTime = Number(els.timeSelector?.value || 3);
-    const newCooldown = Number(els.cooldownSelector?.value || 3);
+    const newCooldown = Number(els.cooldownSelector?.value || 0);
 
     const patch = {
       maxTime: newMaxTime,
@@ -430,6 +436,7 @@ function getSortedPresses(session) {
   return Object.values(session.presses || {})
     .filter(
       (press) =>
+        Number(press.roundId) === Number(session.roundId) &&
         Number.isFinite(press.teamId) &&
         press.teamId > 0 &&
         typeof press.playerName === "string" &&
@@ -455,18 +462,9 @@ function renderSession(session) {
   const progress =
     session.maxTime > 0 ? (session.timeLeft / session.maxTime) * 100 : 0;
 
-  if (els.timeLeftText) {
-    els.timeLeftText.textContent = String(session.timeLeft);
-  }
-
-  if (els.timerBig) {
-    els.timerBig.textContent = String(session.timeLeft);
-  }
-
-  if (els.answerTimeBig) {
-    els.answerTimeBig.textContent = String(session.timeLeft);
-  }
-
+  if (els.timeLeftText) els.timeLeftText.textContent = String(session.timeLeft);
+  if (els.timerBig) els.timerBig.textContent = String(session.timeLeft);
+  if (els.answerTimeBig) els.answerTimeBig.textContent = String(session.timeLeft);
   if (els.cooldownTimeLeft) {
     els.cooldownTimeLeft.textContent = String(getCooldownSecondsLeft(session));
   }
@@ -497,16 +495,12 @@ function renderSession(session) {
 
   if (els.lockStatusBadge) {
     const isOpen = !session.locked;
-    els.lockStatusBadge.textContent = isOpen
-      ? "الأزرار مفتوحة"
-      : "الأزرار مقفلة";
+    els.lockStatusBadge.textContent = isOpen ? "الأزرار مفتوحة" : "الأزرار مقفلة";
     els.lockStatusBadge.className = `state-badge ${isOpen ? "green" : "red"}`;
   }
 
   if (els.toggleLockBtn) {
-    els.toggleLockBtn.textContent = session.locked
-      ? "فتح الأزرار"
-      : "قفل الأزرار";
+    els.toggleLockBtn.textContent = session.locked ? "فتح الأزرار" : "قفل الأزرار";
   }
 
   if (
@@ -522,7 +516,7 @@ function renderSession(session) {
     pageType === "host" &&
     document.activeElement !== els.cooldownSelector
   ) {
-    els.cooldownSelector.value = String(session.cooldown || 3);
+    els.cooldownSelector.value = String(session.cooldown ?? 0);
   }
 
   if (els.deviceBuzzBtn) {
@@ -544,9 +538,7 @@ function renderSession(session) {
   }
 
   if (els.connectionBadge) {
-    els.connectionBadge.textContent = local.joinedPlayer
-      ? "متصل"
-      : "بانتظار الانضمام";
+    els.connectionBadge.textContent = local.joinedPlayer ? "متصل" : "بانتظار الانضمام";
     els.connectionBadge.className =
       `state-badge ${local.joinedPlayer ? "green" : ""}`.trim();
   }
@@ -659,9 +651,7 @@ function renderHostBuzzButtons(session) {
       ${
         isWinner
           ? `<div class="team-winner-indicator">${
-              session.answerExpired
-                ? "انتهى وقت هذا الفريق"
-                : "الفريق الفائز الحالي"
+              session.answerExpired ? "انتهى وقت هذا الفريق" : "الفريق الفائز الحالي"
             }</div>`
           : ""
       }
@@ -835,9 +825,7 @@ async function deleteSessionIfExpired(code) {
 }
 
 async function ensureSession(code) {
-  const codeClean = String(code || "")
-    .trim()
-    .toUpperCase();
+  const codeClean = String(code || "").trim().toUpperCase();
 
   if (!codeClean) throw new Error("كود الجلسة فارغ");
 
@@ -851,13 +839,14 @@ async function ensureSession(code) {
       answerExpired: false,
       timeLeft: 3,
       maxTime: 3,
+      roundId: 1,
       winnerTeamId: null,
       winnerPlayerName: "",
       winnerPlayerId: "",
       winnerPressedAt: null,
       teams: defaultTeams(),
       presses: null,
-      cooldown: 3,
+      cooldown: 0,
       cooldownEndsAt: null,
       cooldownPlayerId: "",
       createdAt: Date.now(),
@@ -865,6 +854,38 @@ async function ensureSession(code) {
       hostUpdatedAt: Date.now(),
       expiresAt: Date.now() + SESSION_EXPIRY_MS,
     });
+    return codeClean;
+  }
+
+  const current = snapshot.val() || {};
+  const patch = {};
+
+  if (!Array.isArray(current.teams) || current.teams.length === 0) {
+    patch.teams = defaultTeams();
+  }
+
+  if (!Number.isFinite(Number(current.maxTime))) {
+    patch.maxTime = 3;
+  }
+
+  if (!Number.isFinite(Number(current.timeLeft))) {
+    patch.timeLeft = Number.isFinite(Number(current.maxTime))
+      ? Number(current.maxTime)
+      : 3;
+  }
+
+  if (!Number.isFinite(Number(current.cooldown))) {
+    patch.cooldown = 0;
+  }
+
+  if (!Number.isFinite(Number(current.roundId))) {
+    patch.roundId = 1;
+  }
+
+  if (Object.keys(patch).length > 0) {
+    patch.updatedAt = Date.now();
+    patch.expiresAt = Date.now() + SESSION_EXPIRY_MS;
+    await update(sessionRef(codeClean), patch);
   }
 
   return codeClean;
@@ -1029,14 +1050,7 @@ async function updateSessionPatch(patch) {
   });
 }
 
-async function clearPresses(code = local.currentSessionCode) {
-  if (!code) return;
-  await set(pressesRef(code), null);
-}
-
 async function resetToFreshRound(session, extraPatch = {}) {
-  await clearPresses(session.code);
-
   await updateSessionPatch({
     winnerTeamId: null,
     winnerPlayerName: "",
@@ -1047,6 +1061,8 @@ async function resetToFreshRound(session, extraPatch = {}) {
     answerExpired: false,
     roundStartedAt: null,
     roundEndsAt: null,
+    roundId: Number(session.roundId || 1) + 1,
+    presses: null,
     timeLeft: session.maxTime || Number(els.timeSelector?.value || 3),
     ...extraPatch,
     hostUpdatedAt: Date.now(),
@@ -1075,8 +1091,8 @@ async function openAllForPlayers() {
   const session = await readCurrentSession();
 
   await resetToFreshRound(session, {
-    cooldownPlayerId: "",
     cooldownEndsAt: null,
+    cooldownPlayerId: "",
   });
 }
 
@@ -1089,7 +1105,7 @@ async function registerPress(teamId, playerName = "") {
     session.locked ||
     (session.winnerTeamId !== null && !session.answerExpired) ||
     isMyCooldownActive(session) ||
-    hasMyPress(session)
+    hasMyPressInCurrentRound(session)
   ) {
     return false;
   }
@@ -1103,6 +1119,7 @@ async function registerPress(teamId, playerName = "") {
     teamId: teamIdNum,
     playerName: safePlayerName,
     pressedAt: Date.now(),
+    roundId: Number(session.roundId || 1),
   });
 
   await update(sessionRef(local.currentSessionCode), {
@@ -1138,14 +1155,13 @@ async function resolveWinnerFromPresses() {
     roundStartedAt: Date.now(),
     roundEndsAt: Date.now() + (session.maxTime || 3) * 1000,
     timeLeft: session.maxTime || 3,
+    presses: null,
     cooldownPlayerId: "",
     cooldownEndsAt: null,
     updatedAt: Date.now(),
     hostUpdatedAt: Date.now(),
     expiresAt: Date.now() + SESSION_EXPIRY_MS,
   });
-
-  await clearPresses(local.currentSessionCode);
 }
 
 async function addPoint() {
@@ -1160,8 +1176,8 @@ async function addPoint() {
 
   await resetToFreshRound(session, {
     teams,
-    cooldownPlayerId: "",
     cooldownEndsAt: null,
+    cooldownPlayerId: "",
   });
 }
 
@@ -1235,6 +1251,8 @@ async function removeTeam(teamId) {
     patch.answerExpired = false;
     patch.roundStartedAt = null;
     patch.roundEndsAt = null;
+    patch.roundId = Number(session.roundId || 1) + 1;
+    patch.presses = null;
     patch.timeLeft = session.maxTime || 3;
   }
 

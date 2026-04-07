@@ -474,6 +474,10 @@ select {
   font-size: 13px;
 }
 
+.winner-gap{
+  margin-top: 8px
+}
+
 .winner-name {
   font-size: 28px;
   font-weight: 900;
@@ -593,6 +597,10 @@ select {
   gap: 8px;
   align-items: center;
   margin-bottom: 10px;
+}
+
+.team-gap{
+  margin-top: 12px
 }
 
 .modern-team-row {
@@ -723,6 +731,10 @@ select {
   font-size: 12px;
 }
 
+.join-gap{
+  margin-top: 12px
+}
+
 .join-url {
   color: #a5b4fc;
   font-weight: 700;
@@ -789,7 +801,7 @@ select {
 .player-join-card {
   width: 100%;
   max-width: 520px;
-  min-height: auto;
+  min-height: 0;
   margin: 0 auto;
 }
 

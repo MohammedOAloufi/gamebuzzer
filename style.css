@@ -373,7 +373,9 @@ select {
   width: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #6366f1, #8b5cf6);
-  transition: width 0.25s linear, background 0.25s ease;
+  transition:
+    width 0.25s linear,
+    background 0.25s ease;
 }
 
 .progress-bar.expired {
@@ -474,8 +476,8 @@ select {
   font-size: 13px;
 }
 
-.winner-gap{
-  margin-top: 8px
+.winner-gap {
+  margin-top: 8px;
 }
 
 .winner-name {
@@ -599,8 +601,8 @@ select {
   margin-bottom: 10px;
 }
 
-.team-gap{
-  margin-top: 12px
+.team-gap {
+  margin-top: 12px;
 }
 
 .modern-team-row {
@@ -609,6 +611,14 @@ select {
 
 .add-team-row {
   align-items: stretch;
+  width: 100%;
+}
+
+.full-add-team-btn {
+  width: 100%;
+  min-height: 48px;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .input,
@@ -620,8 +630,16 @@ select {
   background: rgba(2, 6, 23, 0.6);
   color: #fff;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 16px;
   outline: none;
+}
+
+.select {
+  position: relative;
+  z-index: 5;
+  -webkit-appearance: menulist;
+  appearance: auto;
+  transform: translateZ(0);
 }
 
 .input::placeholder {
@@ -731,8 +749,8 @@ select {
   font-size: 12px;
 }
 
-.join-gap{
-  margin-top: 12px
+.join-gap {
+  margin-top: 12px;
 }
 
 .join-url {
@@ -798,11 +816,22 @@ select {
 }
 
 /* Join page */
+.player-page-container {
+  min-height: calc(100vh - 36px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+
 .player-join-card {
   width: 100%;
-  max-width: 520px;
-  min-height: 0;
+  max-width: 460px;
   margin: 0 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(100vh - 52px);
+  overflow: auto;
 }
 
 .player-join-header,
@@ -810,8 +839,13 @@ select {
   text-align: center;
 }
 
+.player-join-header {
+  padding-top: 18px;
+}
+
 .player-join-content {
   padding-top: 12px;
+  padding-bottom: 18px;
 }
 
 .player-join-form {
@@ -847,10 +881,6 @@ select {
 }
 
 /* Player page */
-.player-page-container {
-  align-items: stretch;
-}
-
 .player-buzzer-card {
   width: 100%;
   max-width: 920px;
@@ -1167,6 +1197,12 @@ select {
   text-align: center;
 }
 
+@media (min-width: 1024px) {
+  .player-join-card {
+    max-width: 440px;
+  }
+}
+
 @media (max-width: 1100px) {
   .host-layout {
     grid-template-columns: 1fr;
@@ -1296,10 +1332,17 @@ select {
 
   .player-page-container {
     min-height: calc(100vh - 20px);
+    padding: 4px 0;
   }
 
   .player-join-card {
     max-width: 100%;
+    max-height: calc(100vh - 28px);
+    border-radius: 18px;
+  }
+
+  .player-join-header {
+    padding-top: 14px;
   }
 
   .player-join-form {
@@ -1388,6 +1431,12 @@ select {
 
   .player-page-container {
     min-height: calc(100vh - 16px);
+    padding: 2px 0;
+  }
+
+  .player-join-card {
+    max-height: calc(100vh - 20px);
+    border-radius: 16px;
   }
 
   .player-buzzer-card {

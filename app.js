@@ -127,10 +127,34 @@ function randomCode(length = 6) {
   return code;
 }
 
+function getTeamDisplayNameByColor(colorClass) {
+  const names = {
+    "team-blue": "الفريق الأزرق",
+    "team-red": "الفريق الأحمر",
+    "team-green": "الفريق الأخضر",
+    "team-purple": "الفريق البنفسجي",
+    "team-orange": "الفريق البرتقالي",
+    "team-yellow": "الفريق الأصفر",
+    "team-cyan": "الفريق السماوي",
+  };
+
+  return names[colorClass] || "فريق جديد";
+}
+
 function defaultTeams() {
   return [
-    { id: 1, name: "الفريق الأول", colorClass: "team-blue", points: 0 },
-    { id: 2, name: "الفريق الثاني", colorClass: "team-red", points: 0 },
+    {
+      id: 1,
+      name: getTeamDisplayNameByColor("team-blue"),
+      colorClass: "team-blue",
+      points: 0,
+    },
+    {
+      id: 2,
+      name: getTeamDisplayNameByColor("team-red"),
+      colorClass: "team-red",
+      points: 0,
+    },
   ];
 }
 
@@ -546,7 +570,9 @@ function renderSession(session) {
   renderWinner(session);
   renderHostBuzzButtons(session);
   renderTeamManager(session);
+  if (!local.joinedPlayer) {
   renderTeamSelect(session);
+}
   renderPlayerTeam(session);
 }
 
@@ -668,6 +694,12 @@ function renderHostBuzzButtons(session) {
 function renderTeamManager(session) {
   if (!els.teamManageList) return;
 
+  const activeElement = document.activeElement;
+  const isEditingTeamName =
+    activeElement &&
+    activeElement.tagName === "INPUT" &&
+    activeElement.closest("#teamManageList");
+
   const renderKey = JSON.stringify(
     session.teams.map((team) => ({
       id: team.id,
@@ -678,8 +710,12 @@ function renderTeamManager(session) {
   );
 
   if (local.lastTeamsRenderKey === renderKey) return;
-  local.lastTeamsRenderKey = renderKey;
 
+  if (isEditingTeamName) {
+    return;
+  }
+
+  local.lastTeamsRenderKey = renderKey;
   els.teamManageList.innerHTML = "";
 
   session.teams.forEach((team) => {
@@ -706,15 +742,50 @@ function renderTeamManager(session) {
     input.value = team.name;
     input.maxLength = 40;
 
-    input.addEventListener("change", async (e) => {
-      try {
-        const name = sanitizeName(e.target.value) || team.name;
-        await updateTeamName(team.id, name);
-      } catch (error) {
-        console.error(error);
-        showToast("تعذر تحديث اسم الفريق", true);
-      }
-    });
+    input.addEventListener("input", (e) => {
+  const newName = sanitizeName(e.target.value) || team.name;
+
+  clearTimeout(input._nameUpdateTimer);
+
+  input._nameUpdateTimer = setTimeout(async () => {
+    try {
+      await updateTeamName(team.id, newName);
+      local.lastTeamsRenderKey = "";
+    } catch (error) {
+      console.error(error);
+      showToast("تعذر تحديث اسم الفريق", true);
+    }
+  }, 250);
+});
+
+input.addEventListener("blur", async (e) => {
+  try {
+    clearTimeout(input._nameUpdateTimer);
+    const name = sanitizeName(e.target.value) || team.name;
+    await updateTeamName(team.id, name);
+    local.lastTeamsRenderKey = "";
+  } catch (error) {
+    console.error(error);
+    showToast("تعذر تحديث اسم الفريق", true);
+  }
+});
+
+input.addEventListener("keydown", async (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+
+    try {
+      clearTimeout(input._nameUpdateTimer);
+      const name = sanitizeName(e.target.value) || team.name;
+      await updateTeamName(team.id, name);
+      local.lastTeamsRenderKey = "";
+      input.blur();
+    } catch (error) {
+      console.error(error);
+      showToast("تعذر تحديث اسم الفريق", true);
+    }
+  }
+});
 
     const scoreWrap = document.createElement("div");
     scoreWrap.className = "score-control-wrap";
@@ -782,6 +853,37 @@ function renderTeamSelect(session) {
   const currentValue =
     Number(els.selectedTeam.value) || storedTeamId || session.teams[0]?.id || 1;
 
+  const nextRenderKey = JSON.stringify(
+    session.teams.map((team) => ({
+      id: Number(team.id),
+      name: String(team.name || "فريق"),
+    })),
+  );
+
+  const isSelectFocused = document.activeElement === els.selectedTeam;
+
+  // إذا نفس البيانات موجودة واليوزر الآن فاتح/محدد القائمة، لا تعيد بناءها
+  if (
+    els.selectedTeam.dataset.renderKey === nextRenderKey &&
+    isSelectFocused
+  ) {
+    renderPlayerTeam(session);
+    return;
+  }
+
+  // إذا نفس البيانات موجودة أصلًا لا داعي لإعادة الرسم
+  if (els.selectedTeam.dataset.renderKey === nextRenderKey) {
+    const hasCurrentOption = Array.from(els.selectedTeam.options).some(
+      (option) => Number(option.value) === currentValue,
+    );
+
+    if (hasCurrentOption) {
+      els.selectedTeam.value = String(currentValue);
+      renderPlayerTeam(session);
+      return;
+    }
+  }
+
   els.selectedTeam.innerHTML = "";
 
   session.teams.forEach((team) => {
@@ -791,6 +893,8 @@ function renderTeamSelect(session) {
     if (team.id === currentValue) option.selected = true;
     els.selectedTeam.appendChild(option);
   });
+
+  els.selectedTeam.dataset.renderKey = nextRenderKey;
 
   renderPlayerTeam(session);
 }
@@ -1197,9 +1301,6 @@ async function changeTeamPoints(teamId, amount) {
 }
 
 async function addTeam() {
-  const name = sanitizeName(els.newTeamName?.value);
-  if (!name) return;
-
   const session = await readCurrentSession();
   const nextId = Date.now();
 
@@ -1213,18 +1314,24 @@ async function addTeam() {
       ? availableColors[0]
       : TEAM_COLORS[session.teams.length % TEAM_COLORS.length];
 
-  const teams = [...session.teams, { id: nextId, name, colorClass, points: 0 }];
+  const autoName = getTeamDisplayNameByColor(colorClass);
+
+  const teams = [
+    ...session.teams,
+    {
+      id: nextId,
+      name: autoName,
+      colorClass,
+      points: 0,
+    },
+  ];
 
   await updateSessionPatch({
     teams,
     hostUpdatedAt: Date.now(),
   });
 
-  if (els.newTeamName) {
-    els.newTeamName.value = "";
-  }
-
-  showToast("تمت إضافة الفريق");
+  showToast(`تمت إضافة ${autoName}`);
 }
 
 async function removeTeam(teamId) {
@@ -1540,17 +1647,6 @@ function bindHostEvents() {
       } catch (error) {
         console.error(error);
         showToast("تعذر إضافة الفريق", true);
-      }
-    });
-  }
-
-  if (els.newTeamName) {
-    els.newTeamName.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        addTeam().catch((error) => {
-          console.error(error);
-          showToast("تعذر إضافة الفريق", true);
-        });
       }
     });
   }

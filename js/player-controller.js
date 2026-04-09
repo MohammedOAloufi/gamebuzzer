@@ -2,11 +2,11 @@ import { els } from "./dom.js";
 import { pageType, local, PLAYER_HEARTBEAT_MS } from "./state.js";
 import { onDisconnect, set, update } from "./firebase.js";
 import {
+  claimBuzz,
   getCurrentPlayerName,
   getSelectedTeamId,
   readCurrentSession,
   refreshSessionExpiry,
-  registerPress,
   presenceRef,
   sessionRef,
 } from "./session-service.js";
@@ -191,7 +191,7 @@ export function bindPlayerEvents() {
         }
 
         await attachPresence(local.currentSessionCode);
-        const ok = await registerPress(fixedTeamId, fixedPlayerName);
+        const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
 
         if (!ok) {
           showToast("تم إغلاق الجولة أو سبق أن ضغطت", true);

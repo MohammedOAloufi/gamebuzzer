@@ -16,7 +16,6 @@ import {
   openAllForPlayers,
   addPoint,
   addTeam,
-  resolveWinnerFromPresses,
   sessionRef,
   normalizeSession,
 } from "./session-service.js";
@@ -125,8 +124,6 @@ export async function startTickWorker() {
 
       if (!local.currentSessionCode) return;
 
-      await resolveWinnerFromPresses();
-
       const snapshot = await get(sessionRef(local.currentSessionCode));
       if (!snapshot.exists()) return;
 
@@ -162,6 +159,7 @@ export async function startTickWorker() {
             cooldownEnabled && session.winnerPlayerId
               ? Date.now() + session.cooldown * 1000
               : null,
+          presses: null,
           hostUpdatedAt: Date.now(),
         });
       }
@@ -233,7 +231,9 @@ export function bindHostEvents() {
   if (els.copyJoinBtn) {
     els.copyJoinBtn.addEventListener("click", async () => {
       try {
-        const safeText = String(getPlayerJoinUrl(local.currentSessionCode)).trim();
+        const safeText = String(
+          getPlayerJoinUrl(local.currentSessionCode),
+        ).trim();
 
         if (!safeText) {
           showToast("لا يوجد نص للنسخ", true);

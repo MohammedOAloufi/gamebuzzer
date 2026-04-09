@@ -1,13 +1,6 @@
-import { db, ref, set, update, get } from "./firebase.js";
-import {
-  TEAM_COLORS,
-  SESSION_EXPIRY_MS,
-  local,
-} from "./state.js";
-import {
-  sanitizeName,
-  getTeamDisplayNameByColor,
-} from "./utils.js";
+import { db, ref, set, update, get, runTransaction } from "./firebase.js";
+import { TEAM_COLORS, SESSION_EXPIRY_MS, local } from "./state.js";
+import { sanitizeName, getTeamDisplayNameByColor } from "./utils.js";
 import { els } from "./dom.js";
 
 export function defaultTeams() {
@@ -143,7 +136,9 @@ export function isMyCooldownActive(session) {
 
 export function hasMyPressInCurrentRound(session) {
   const myPress = session.presses?.[local.deviceId];
-  return Boolean(myPress && Number(myPress.roundId) === Number(session.roundId));
+  return Boolean(
+    myPress && Number(myPress.roundId) === Number(session.roundId),
+  );
 }
 
 export function canBuzz(session) {
@@ -207,7 +202,9 @@ export async function deleteSessionIfExpired(code) {
 }
 
 export async function ensureSession(code) {
-  const codeClean = String(code || "").trim().toUpperCase();
+  const codeClean = String(code || "")
+    .trim()
+    .toUpperCase();
 
   if (!codeClean) {
     throw new Error("كود الجلسة فارغ");
@@ -389,6 +386,86 @@ export async function registerPress(teamId, playerName = "") {
   });
 
   return true;
+}
+
+export async function claimBuzz(teamId, playerName = "") {
+  if (!local.currentSessionCode) return false;
+
+  const session = await readCurrentSession();
+
+  if (
+    session.locked ||
+    (session.winnerTeamId !== null && !session.answerExpired) ||
+    isMyCooldownActive(session) ||
+    hasMyPressInCurrentRound(session)
+  ) {
+    return false;
+  }
+
+  const safePlayerName = sanitizeName(playerName) || "لاعب";
+  const teamIdNum = Number(teamId);
+
+  if (!Number.isFinite(teamIdNum)) return false;
+
+  const result = await runTransaction(
+    sessionRef(local.currentSessionCode),
+    (current) => {
+      if (!current) return current;
+
+      const currentWinner =
+        current.winnerTeamId === null || current.winnerTeamId === undefined
+          ? null
+          : Number(current.winnerTeamId);
+
+      const locked = Boolean(current.locked);
+      const answerExpired = Boolean(current.answerExpired);
+      const roundId = Number(current.roundId || 1);
+      const maxTime = Number(current.maxTime || 3);
+      const cooldown = Number(current.cooldown || 0);
+      const cooldownPlayerId = String(current.cooldownPlayerId || "");
+      const cooldownEndsAt = current.cooldownEndsAt ?? null;
+
+      const myCooldownActive =
+        cooldownPlayerId === local.deviceId &&
+        Boolean(cooldownEndsAt) &&
+        Date.now() < Number(cooldownEndsAt);
+
+      if (
+        locked ||
+        (currentWinner !== null && !answerExpired) ||
+        myCooldownActive
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+
+      return {
+        ...current,
+        winnerTeamId: teamIdNum,
+        winnerPlayerName: safePlayerName,
+        winnerPlayerId: local.deviceId,
+        winnerPressedAt: now,
+        locked: true,
+        timerRunning: true,
+        answerExpired: false,
+        roundStartedAt: now,
+        roundEndsAt: now + maxTime * 1000,
+        timeLeft: maxTime,
+        cooldownPlayerId: "",
+        cooldownEndsAt: null,
+        updatedAt: now,
+        hostUpdatedAt: now,
+        expiresAt: now + SESSION_EXPIRY_MS,
+        presses: null,
+      };
+    },
+    {
+      applyLocally: true,
+    },
+  );
+
+  return result.committed === true;
 }
 
 export async function resolveWinnerFromPresses() {

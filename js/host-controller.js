@@ -5,9 +5,9 @@ import {
   PLAYER_ACTIVE_WINDOW_MS,
   SESSION_IDLE_DELETE_MS,
   HOST_HEARTBEAT_MS,
-  SESSION_EXPIRY_MS,
 } from "./state.js";
 import { get, set } from "./firebase.js";
+import { getPlayerJoinUrl } from "./utils.js";
 import {
   readCurrentSession,
   updateSessionPatch,
@@ -19,8 +19,9 @@ import {
   resolveWinnerFromPresses,
   sessionRef,
   normalizeSession,
+  ensureSession,
 } from "./session-service.js";
-import { showToast } from "./ui-renderer.js";
+import { showToast, updateQRCode } from "./ui-renderer.js";
 
 export async function syncHostSettings() {
   if (!local.currentSessionCode) return;
@@ -171,6 +172,50 @@ export async function startTickWorker() {
 }
 
 export function bindHostEvents() {
+  if (els.createSessionBtn) {
+    els.createSessionBtn.addEventListener("click", async () => {
+      try {
+        const queryCode = new URLSearchParams(window.location.search).get("session");
+        const cleanCode = String(
+          local.currentSessionCode || queryCode || "",
+        )
+          .trim()
+          .toUpperCase();
+
+        if (!cleanCode) {
+          showToast("لا يوجد كود جلسة صالح", true);
+          return;
+        }
+
+        const readyCode = await ensureSession(cleanCode);
+        local.currentSessionCode = readyCode;
+
+        const url = new URL(window.location.href);
+        url.searchParams.set("session", readyCode);
+        window.history.replaceState({}, "", url.toString());
+
+        if (els.sessionCode) {
+          els.sessionCode.textContent = readyCode;
+        }
+
+        if (els.joinUrlText) {
+          els.joinUrlText.textContent = getPlayerJoinUrl(readyCode);
+        }
+
+        updateQRCode(readyCode);
+
+        await updateSessionPatch({
+          hostUpdatedAt: Date.now(),
+        });
+
+        showToast("تم تحديث الجلسة");
+      } catch (error) {
+        console.error(error);
+        showToast("تعذر تحديث الجلسة", true);
+      }
+    });
+  }
+
   if (els.copyCodeBtn) {
     els.copyCodeBtn.addEventListener("click", async () => {
       try {
@@ -206,7 +251,6 @@ export function bindHostEvents() {
   if (els.copyJoinBtn) {
     els.copyJoinBtn.addEventListener("click", async () => {
       try {
-        const { getPlayerJoinUrl } = await import("./utils.js");
         const safeText = String(getPlayerJoinUrl(local.currentSessionCode)).trim();
 
         if (!safeText) {

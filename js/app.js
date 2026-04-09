@@ -1,16 +1,13 @@
 import { els } from "./dom.js";
 import { pageType, local } from "./state.js";
-import { onValue, get } from "./firebase.js";
+import { get } from "./firebase.js";
 import { randomCode } from "./utils.js";
 import {
   deleteSessionIfExpired,
-  ensureSession,
-  normalizeSession,
   sessionRef,
 } from "./session-service.js";
 import {
   hideJoinError,
-  renderSession,
   showJoinError,
   showPlayerJoinView,
   showToast,
@@ -18,7 +15,6 @@ import {
 } from "./ui-renderer.js";
 import {
   bindHostEvents,
-  startHostHeartbeat,
   startTickWorker,
   stopHostHeartbeat,
 } from "./host-controller.js";
@@ -28,59 +24,7 @@ import {
   loadPlayerDraft,
   stopPlayerHeartbeat,
 } from "./player-controller.js";
-
-async function subscribeToSession(code) {
-  local.currentSessionCode = code;
-  local.lastQrCodeValue = "";
-  local.lastTeamsRenderKey = "";
-
-  if (typeof local.unsubscribeSession === "function") {
-    local.unsubscribeSession();
-    local.unsubscribeSession = null;
-  }
-
-  const sRef = sessionRef(code);
-
-  local.unsubscribeSession = onValue(
-    sRef,
-    async (snapshot) => {
-      if (!snapshot.exists()) {
-        if (els.connectionBadge) {
-          els.connectionBadge.textContent = "الجلسة غير موجودة";
-          els.connectionBadge.className = "state-badge red";
-        }
-
-        showToast("هذه الجلسة غير موجودة", true);
-        return;
-      }
-
-      const session = normalizeSession(snapshot.val(), code);
-      local.lastSession = snapshot.val();
-      renderSession(session);
-    },
-    (error) => {
-      console.error(error);
-      showToast("تعذر الاتصال بالجلسة", true);
-    },
-  );
-}
-
-async function createOrLoadSession(code = randomCode()) {
-  const readyCode = await ensureSession(code);
-
-  const wasDeleted = await deleteSessionIfExpired(readyCode);
-  if (wasDeleted) {
-    throw new Error("الجلسة كانت منتهية وتم حذفها");
-  }
-
-  await subscribeToSession(readyCode);
-
-  if (pageType === "host") {
-    startHostHeartbeat();
-  }
-
-  showToast("تم تجهيز الجلسة");
-}
+import { createOrLoadSession, subscribeToSession } from "./session-runtime.js";
 
 function bindHomeEvents() {
   if (els.createSessionBtn) {
@@ -217,11 +161,13 @@ async function boot() {
   }
 
   if (pageType === "host") {
-    await createOrLoadSession(cleanCode);
+    const readyCode = await createOrLoadSession(cleanCode);
 
     const url = new URL(window.location.href);
-    url.searchParams.set("session", cleanCode);
+    url.searchParams.set("session", readyCode);
     window.history.replaceState({}, "", url.toString());
+
+    showToast("تم تجهيز الجلسة");
     return;
   }
 

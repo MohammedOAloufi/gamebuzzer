@@ -7,7 +7,7 @@ import {
   HOST_HEARTBEAT_MS,
 } from "./state.js";
 import { get, set } from "./firebase.js";
-import { getPlayerJoinUrl } from "./utils.js";
+import { getPlayerJoinUrl, randomCode } from "./utils.js";
 import {
   readCurrentSession,
   updateSessionPatch,
@@ -19,9 +19,9 @@ import {
   resolveWinnerFromPresses,
   sessionRef,
   normalizeSession,
-  ensureSession,
 } from "./session-service.js";
-import { showToast, updateQRCode } from "./ui-renderer.js";
+import { showToast } from "./ui-renderer.js";
+import { createOrLoadSession } from "./session-runtime.js";
 
 export async function syncHostSettings() {
   if (!local.currentSessionCode) return;
@@ -175,20 +175,8 @@ export function bindHostEvents() {
   if (els.createSessionBtn) {
     els.createSessionBtn.addEventListener("click", async () => {
       try {
-        const queryCode = new URLSearchParams(window.location.search).get("session");
-        const cleanCode = String(
-          local.currentSessionCode || queryCode || "",
-        )
-          .trim()
-          .toUpperCase();
-
-        if (!cleanCode) {
-          showToast("لا يوجد كود جلسة صالح", true);
-          return;
-        }
-
-        const readyCode = await ensureSession(cleanCode);
-        local.currentSessionCode = readyCode;
+        const newCode = randomCode();
+        const readyCode = await createOrLoadSession(newCode);
 
         const url = new URL(window.location.href);
         url.searchParams.set("session", readyCode);
@@ -202,16 +190,10 @@ export function bindHostEvents() {
           els.joinUrlText.textContent = getPlayerJoinUrl(readyCode);
         }
 
-        updateQRCode(readyCode);
-
-        await updateSessionPatch({
-          hostUpdatedAt: Date.now(),
-        });
-
-        showToast("تم تحديث الجلسة");
+        showToast("تم إنشاء جلسة جديدة");
       } catch (error) {
         console.error(error);
-        showToast("تعذر تحديث الجلسة", true);
+        showToast("تعذر إنشاء جلسة جديدة", true);
       }
     });
   }

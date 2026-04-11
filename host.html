@@ -143,15 +143,29 @@
             </div>
           </div>
 
-          <div class="card compact-card">
+          <div class="card compact-card session-info-card">
             <div class="card-header">
               <h2 class="card-title">معلومات الجلسة</h2>
               <p class="card-desc">شارك الكود أو الرابط مع اللاعبين</p>
             </div>
-            <div class="card-content">
-              <div class="session-grid compact-session-grid">
+
+            <div class="card-content session-card-body">
+              <button
+                class="session-privacy-toggle"
+                id="sessionPrivacyToggle"
+                type="button"
+                title="إظهار أو إخفاء بيانات الجلسة"
+                aria-label="إظهار أو إخفاء بيانات الجلسة"
+              >
+                👁
+              </button>
+
+              <div class="session-grid compact-session-grid session-info-grid">
                 <div>
-                  <div class="session-code-box compact-session-box">
+                  <div
+                    class="session-code-box compact-session-box session-sensitive-area is-blurred"
+                    id="sessionSensitiveArea"
+                  >
                     <div class="session-code-label">كود الجلسة</div>
                     <div class="session-code" id="sessionCode">------</div>
                   </div>
@@ -169,15 +183,15 @@
                   </div>
                 </div>
 
-                <div class="qr-box compact-qr-box">
+                <div
+                  class="qr-box compact-qr-box session-sensitive-area is-blurred"
+                  id="sessionQrArea"
+                >
                   <div id="qrcode"></div>
                 </div>
               </div>
 
-              <div class="join-box compact-join-box join-gap">
-                <div>رابط دخول اللاعب:</div>
-                <span class="join-url" id="joinUrlText"></span>
-              </div>
+              <span class="hidden" id="joinUrlText"></span>
             </div>
           </div>
         </div>

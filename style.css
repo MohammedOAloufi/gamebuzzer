@@ -909,22 +909,6 @@ select {
   gap: 12px;
 }
 
-.player-top-meta {
-  display: flex;
-  justify-content: center;
-}
-
-.player-mini-session {
-  text-align: center;
-}
-
-.compact-session-code {
-  font-size: 28px;
-  font-weight: 900;
-  letter-spacing: 0.16em;
-  color: #c7d2fe;
-}
-
 .player-main-layout {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
@@ -1197,6 +1181,59 @@ select {
   text-align: center;
 }
 
+.session-info-card .session-card-body {
+  position: relative;
+}
+
+.session-info-grid {
+  margin-top: 0;
+}
+
+.session-sensitive-area {
+  transition:
+    filter 0.22s ease,
+    opacity 0.22s ease;
+}
+
+.session-sensitive-area.is-blurred {
+  filter: blur(10px);
+  opacity: 0.75;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.session-privacy-toggle {
+  position: absolute;
+  top: -55px;
+  left: 12px;
+  z-index: 3;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 24px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.session-privacy-toggle:hover {
+  transform: translateY(-1px);
+  background: rgba(30, 41, 59, 0.96);
+  border-color: rgba(129, 140, 248, 0.28);
+}
+
+.session-privacy-toggle:active {
+  transform: scale(0.97);
+}
+
 @media (min-width: 1024px) {
   .player-join-card {
     max-width: 440px;
@@ -1422,6 +1459,14 @@ select {
     font-size: 30px;
     border-radius: 24px;
   }
+
+  .session-privacy-toggle {
+    top: -45px;
+    left: 10px;
+    width: 50px;
+    height: 50px;
+    font-size: 22px;
+  }
 }
 
 @media (max-width: 420px) {
@@ -1520,5 +1565,11 @@ select {
 
   .join-session-code {
     font-size: 22px;
+  }
+
+  .session-privacy-toggle {
+    width: 46px;
+    height: 46px;
+    font-size: 20px;
   }
 }

@@ -410,7 +410,6 @@ export function renderPlayerTeam(session) {
 export function renderSession(session) {
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
-  if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
 
   if (els.joinUrlText) {
     els.joinUrlText.textContent = getPlayerJoinUrl(session.code);

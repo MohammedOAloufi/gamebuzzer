@@ -169,7 +169,43 @@ export async function startTickWorker() {
   }, 500);
 }
 
+function setSensitiveVisibility(visible) {
+  const targets = [els.sessionSensitiveArea, els.sessionQrArea].filter(Boolean);
+
+  targets.forEach((element) => {
+    if (visible) {
+      element.classList.remove("is-blurred");
+    } else {
+      element.classList.add("is-blurred");
+    }
+  });
+
+  if (els.sessionPrivacyToggle) {
+    els.sessionPrivacyToggle.textContent = visible ? "🙈" : "👁";
+    els.sessionPrivacyToggle.title = visible
+      ? "إخفاء بيانات الجلسة"
+      : "إظهار بيانات الجلسة";
+    els.sessionPrivacyToggle.setAttribute(
+      "aria-label",
+      visible ? "إخفاء بيانات الجلسة" : "إظهار بيانات الجلسة",
+    );
+  }
+}
+
+function bindSessionPrivacyToggle() {
+  if (!els.sessionPrivacyToggle) return;
+
+  setSensitiveVisibility(false);
+
+  els.sessionPrivacyToggle.addEventListener("click", () => {
+    const isHidden = els.sessionSensitiveArea?.classList.contains("is-blurred");
+    setSensitiveVisibility(Boolean(isHidden));
+  });
+}
+
 export function bindHostEvents() {
+  bindSessionPrivacyToggle();
+
   if (els.createSessionBtn) {
     els.createSessionBtn.addEventListener("click", async () => {
       try {

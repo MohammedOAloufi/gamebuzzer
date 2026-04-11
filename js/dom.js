@@ -47,5 +47,9 @@ export const els = {
   timeSelector: document.getElementById("timeSelector"),
   cooldownSelector: document.getElementById("cooldownSelector"),
 
+  sessionPrivacyToggle: document.getElementById("sessionPrivacyToggle"),
+  sessionSensitiveArea: document.getElementById("sessionSensitiveArea"),
+  sessionQrArea: document.getElementById("sessionQrArea"),
+
   toast: document.getElementById("toast"),
 };

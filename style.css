@@ -52,6 +52,33 @@ body {
   align-items: center;
 }
 
+.developer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.developer-link {
+  color: #e5e7eb;
+  text-decoration: none;
+  font-weight: 600;
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.developer-link:hover {
+  color: #9f8cff;
+  opacity: 1;
+}
+
+.developer-separator {
+  color: rgba(255, 255, 255, 0.35);
+}
+
 .topbar {
   display: flex;
   align-items: center;

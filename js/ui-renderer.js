@@ -54,6 +54,16 @@ function cloneSoundSession(session) {
   };
 }
 
+function formatCountdownValue(value, showDecimal = false) {
+  const safeValue = Math.max(0, Number(value || 0));
+
+  if (!showDecimal) {
+    return String(Math.ceil(safeValue));
+  }
+
+  return safeValue.toFixed(1);
+}
+
 function syncHostSounds(session) {
   if (pageType !== "host") return;
 
@@ -544,28 +554,47 @@ export function renderSession(session) {
   updateQRCode(session.code);
 
   const now = Date.now();
-  let displayTime = Number(session.timeLeft || 0);
+
+  let displayTimeRaw = Number(session.timeLeft || session.maxTime || 0);
+  let showDecimalTime = false;
+  let locallyFinished = false;
 
   if (session.timerRunning && session.roundEndsAt) {
     const leftMs = Number(session.roundEndsAt) - now;
-    displayTime = Math.max(0, Math.ceil(leftMs / 1000));
+    displayTimeRaw = Math.max(0, leftMs / 1000);
+    showDecimalTime = true;
+    locallyFinished = leftMs <= 0;
   }
 
-  const progress =
-    session.maxTime > 0 ? (displayTime / session.maxTime) * 100 : 0;
+  const activeCooldownSeconds = getCooldownSecondsLeft(session);
+  const cooldownDisplay =
+    activeCooldownSeconds > 0
+      ? activeCooldownSeconds
+      : Number(session.cooldown || 0);
 
-  if (els.timeLeftText) els.timeLeftText.textContent = String(displayTime);
-  if (els.timerBig) els.timerBig.textContent = String(displayTime);
-  if (els.answerTimeBig) els.answerTimeBig.textContent = String(displayTime);
+  const isExpiredDisplay =
+    locallyFinished ||
+    (Boolean(session.answerExpired) &&
+      !session.timerRunning &&
+      Number(session.timeLeft || 0) === 0);
+
+  const progress =
+    session.maxTime > 0 ? (displayTimeRaw / session.maxTime) * 100 : 0;
+
+  const displayTimeText = formatCountdownValue(displayTimeRaw, showDecimalTime);
+
+  if (els.timeLeftText) els.timeLeftText.textContent = displayTimeText;
+  if (els.timerBig) els.timerBig.textContent = displayTimeText;
+  if (els.answerTimeBig) els.answerTimeBig.textContent = displayTimeText;
 
   if (els.cooldownTimeLeft) {
-    els.cooldownTimeLeft.textContent = String(getCooldownSecondsLeft(session));
+    els.cooldownTimeLeft.textContent = String(cooldownDisplay);
   }
 
   if (els.progressBar) {
-    if (session.answerExpired) {
+    if (isExpiredDisplay) {
       els.progressBar.style.width = "100%";
-      els.progressBar.classList.add("expired");
+      els.progressBar.classList.remove("expired");
     } else {
       els.progressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
       els.progressBar.classList.remove("expired");
@@ -573,7 +602,7 @@ export function renderSession(session) {
   }
 
   if (els.timerStatusBadge) {
-    if (session.answerExpired) {
+    if (isExpiredDisplay) {
       els.timerStatusBadge.textContent = "انتهى الوقت";
       els.timerStatusBadge.className = "state-badge gray";
     } else {
@@ -614,13 +643,13 @@ export function renderSession(session) {
   }
 
   if (els.deviceBuzzBtn) {
-    const enabled = canBuzz(session);
+    const enabled = !locallyFinished && canBuzz(session);
     els.deviceBuzzBtn.disabled = !enabled;
 
     const amIWinner =
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;
 
-    if (amIWinner && !session.answerExpired) {
+    if (amIWinner && !session.answerExpired && !locallyFinished) {
       els.deviceBuzzBtn.style.background =
         "linear-gradient(135deg, #22c55e, #16a34a)";
     } else if (isMyCooldownActive(session)) {
@@ -671,5 +700,5 @@ export function startUiTicker() {
     }
 
     renderSession(session);
-  }, 250);
+  }, 100);
 }

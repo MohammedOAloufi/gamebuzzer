@@ -36,11 +36,7 @@ export async function syncHostSettings() {
       hostUpdatedAt: Date.now(),
     };
 
-    if (
-      !session.timerRunning &&
-      !session.answerExpired &&
-      session.winnerTeamId === null
-    ) {
+    if (!session.timerRunning) {
       patch.timeLeft = newMaxTime;
     }
 
@@ -129,56 +125,50 @@ export async function startTickWorker() {
 
       const session = normalizeSession(
         snapshot.val(),
-        local.currentSessionCode
+        local.currentSessionCode,
       );
 
       if (!session.timerRunning || !session.roundEndsAt) return;
 
       const now = Date.now();
       const leftMs = Number(session.roundEndsAt) - now;
-      const nextLeft = Math.max(0, Math.ceil(leftMs / 1000));
 
-      // ✅ تحديث فقط عند التغيير
-      if (nextLeft > 0) {
-        if (nextLeft !== session.timeLeft) {
-          await updateSessionPatch({
-            timeLeft: nextLeft,
-          });
-        }
-        return;
-      }
-
-      // ✅ انتهاء الوقت
-      if (nextLeft <= 0 && session.timerRunning) {
+      if (leftMs <= 0) {
         const cooldownEnabled = Number(session.cooldown || 0) > 0;
 
         await updateSessionPatch({
-          timeLeft: session.maxTime || 3,
+          timeLeft: 0,
           timerRunning: false,
           answerExpired: true,
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
-
-          //  منع الفريق كامل
           cooldownTeamId:
             cooldownEnabled && session.winnerTeamId !== null
               ? Number(session.winnerTeamId)
               : null,
-
           cooldownEndsAt:
             cooldownEnabled && session.winnerTeamId !== null
               ? now + session.cooldown * 1000
               : null,
-
           presses: null,
           hostUpdatedAt: now,
+        });
+
+        return;
+      }
+
+      const nextLeft = Math.max(1, Math.ceil(leftMs / 1000));
+
+      if (nextLeft !== session.timeLeft) {
+        await updateSessionPatch({
+          timeLeft: nextLeft,
         });
       }
     } catch (error) {
       console.error(error);
     }
-  }, 1000); // 🔥 كان 500
+  }, 100);
 }
 
 function setSensitiveVisibility(visible) {

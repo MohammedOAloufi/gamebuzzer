@@ -15,6 +15,129 @@ import {
   updateTeamName,
 } from "./session-service.js";
 
+function playAudioSafe(audioEl) {
+  if (!audioEl) return;
+
+  try {
+    audioEl.pause();
+    audioEl.currentTime = 0;
+
+    const playPromise = audioEl.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function cloneSoundSession(session) {
+  return {
+    code: String(session.code || ""),
+    roundId: Number(session.roundId || 1),
+    winnerTeamId:
+      session.winnerTeamId === null || session.winnerTeamId === undefined
+        ? null
+        : Number(session.winnerTeamId),
+    winnerPlayerId: String(session.winnerPlayerId || ""),
+    answerExpired: Boolean(session.answerExpired),
+    timerRunning: Boolean(session.timerRunning),
+    timeLeft: Number(session.timeLeft || 0),
+    maxTime: Number(session.maxTime || 0),
+    roundStartedAt: Number(session.roundStartedAt || 0),
+    teams: Array.isArray(session.teams)
+      ? session.teams.map((team) => ({
+          id: Number(team.id),
+          points: Number(team.points || 0),
+        }))
+      : [],
+  };
+}
+
+function syncHostSounds(session) {
+  if (pageType !== "host") return;
+
+  const prevSession = syncHostSounds._prevSession || null;
+  const currentRoundKey = [
+    String(session.code || ""),
+    Number(session.roundId || 1),
+    String(session.winnerPlayerId || ""),
+    Number(session.roundStartedAt || 0),
+  ].join(":");
+
+  const currentTimeLeft = Number(session.timeLeft || 0);
+  const maxTime = Number(session.maxTime || 0);
+
+  if (
+    session.timerRunning &&
+    !session.answerExpired &&
+    session.winnerTeamId !== null &&
+    Number.isFinite(currentTimeLeft) &&
+    Number.isFinite(maxTime) &&
+    currentTimeLeft > 0 &&
+    currentTimeLeft <= maxTime
+  ) {
+    if (syncHostSounds._roundKey !== currentRoundKey) {
+      syncHostSounds._roundKey = currentRoundKey;
+      syncHostSounds._lastTickSecond = null;
+    }
+
+    if (syncHostSounds._lastTickSecond === null) {
+      playAudioSafe(els.countdownTickAudio);
+      syncHostSounds._lastTickSecond = currentTimeLeft;
+    } else if (currentTimeLeft < syncHostSounds._lastTickSecond) {
+      playAudioSafe(els.countdownTickAudio);
+      syncHostSounds._lastTickSecond = currentTimeLeft;
+    }
+  } else {
+    syncHostSounds._roundKey = "";
+    syncHostSounds._lastTickSecond = null;
+  }
+
+  if (prevSession) {
+    const timeEndedNow =
+      prevSession.answerExpired === false &&
+      session.answerExpired === true &&
+      prevSession.winnerTeamId !== null;
+
+    if (timeEndedNow) {
+      playAudioSafe(els.endTimeAudio);
+    }
+
+    const previousPointsByTeam = new Map(
+      (prevSession.teams || []).map((team) => [
+        Number(team.id),
+        Number(team.points || 0),
+      ]),
+    );
+
+    const currentPointsByTeam = new Map(
+      (session.teams || []).map((team) => [
+        Number(team.id),
+        Number(team.points || 0),
+      ]),
+    );
+
+    const pointAddedFromWinnerButton =
+      prevSession.answerExpired === false &&
+      prevSession.winnerTeamId !== null &&
+      session.winnerTeamId === null &&
+      Number(session.roundId || 0) > Number(prevSession.roundId || 0) &&
+      Number(
+        currentPointsByTeam.get(Number(prevSession.winnerTeamId)) || 0,
+      ) ===
+        Number(
+          previousPointsByTeam.get(Number(prevSession.winnerTeamId)) || 0,
+        ) + 1;
+
+    if (pointAddedFromWinnerButton) {
+      playAudioSafe(els.pointAddedAudio);
+    }
+  }
+
+  syncHostSounds._prevSession = cloneSoundSession(session);
+}
+
 export function showToast(message, isError = false) {
   if (!els.toast) return;
 
@@ -410,6 +533,7 @@ export function renderPlayerTeam(session) {
 export function renderSession(session) {
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
+  if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
 
   if (els.joinUrlText) {
     els.joinUrlText.textContent = getPlayerJoinUrl(session.code);
@@ -512,6 +636,7 @@ export function renderSession(session) {
   }
 
   renderPlayerTeam(session);
+  syncHostSounds(session);
 }
 
 export function startUiTicker() {

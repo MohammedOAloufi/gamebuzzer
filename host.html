@@ -157,7 +157,7 @@
                 title="إظهار أو إخفاء بيانات الجلسة"
                 aria-label="إظهار أو إخفاء بيانات الجلسة"
               >
-                👁
+                <img id="eyeIcon" src="media/view.png" alt="إظهار" />
               </button>
 
               <div class="session-grid compact-session-grid session-info-grid">
@@ -197,6 +197,18 @@
         </div>
       </section>
     </div>
+
+    <audio id="countdownTickAudio" preload="auto">
+      <source src="media/countdown.mp3" type="audio/mpeg" />
+    </audio>
+
+    <audio id="endTimeAudio" preload="auto">
+      <source src="media/endTime.mp3" type="audio/mpeg" />
+    </audio>
+
+    <audio id="pointAddedAudio" preload="auto">
+      <source src="media/point.mp3" type="audio/mpeg" />
+    </audio>
 
     <div class="toast" id="toast"></div>
 

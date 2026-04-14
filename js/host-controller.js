@@ -180,8 +180,14 @@ function setSensitiveVisibility(visible) {
     }
   });
 
+  const eyeIcon = document.getElementById("eyeIcon");
+
+  if (eyeIcon) {
+    eyeIcon.src = visible ? "media/close-eye.png" : "media/view.png";
+    eyeIcon.alt = visible ? "إخفاء" : "إظهار";
+  }
+
   if (els.sessionPrivacyToggle) {
-    els.sessionPrivacyToggle.textContent = visible ? "🙈" : "👁";
     els.sessionPrivacyToggle.title = visible
       ? "إخفاء بيانات الجلسة"
       : "إظهار بيانات الجلسة";

@@ -1207,9 +1207,9 @@ select {
   top: -55px;
   left: 12px;
   z-index: 3;
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(15, 23, 42, 0.92);
   color: #fff;
@@ -1228,6 +1228,13 @@ select {
   transform: translateY(-1px);
   background: rgba(30, 41, 59, 0.96);
   border-color: rgba(129, 140, 248, 0.28);
+}
+
+.session-privacy-toggle img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .session-privacy-toggle:active {
@@ -1461,10 +1468,10 @@ select {
   }
 
   .session-privacy-toggle {
-    top: -45px;
+    top: -57px;
     left: 10px;
-    width: 50px;
-    height: 50px;
+    width: 40px;
+    height: 40px;
     font-size: 22px;
   }
 }
@@ -1568,8 +1575,10 @@ select {
   }
 
   .session-privacy-toggle {
-    width: 46px;
-    height: 46px;
+    top: -48px;
+    left: 10px;
+    width: 40px;
+    height: 40px;
     font-size: 20px;
   }
 }

@@ -51,5 +51,9 @@ export const els = {
   sessionSensitiveArea: document.getElementById("sessionSensitiveArea"),
   sessionQrArea: document.getElementById("sessionQrArea"),
 
+  countdownTickAudio: document.getElementById("countdownTickAudio"),
+  endTimeAudio: document.getElementById("endTimeAudio"),
+  pointAddedAudio: document.getElementById("pointAddedAudio"),
+
   toast: document.getElementById("toast"),
 };

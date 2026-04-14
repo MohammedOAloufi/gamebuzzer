@@ -176,6 +176,8 @@ export function bindPlayerEvents() {
 
   if (els.deviceBuzzBtn) {
     els.deviceBuzzBtn.addEventListener("click", async () => {
+      const buzzBtn = els.deviceBuzzBtn;
+
       try {
         const fixedTeamId = Number(local.playerTeamId);
         const fixedPlayerName = local.playerName || getCurrentPlayerName();
@@ -190,15 +192,37 @@ export function bindPlayerEvents() {
           return;
         }
 
-        await attachPresence(local.currentSessionCode);
-        const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
+        if (buzzBtn.dataset.pending === "1") {
+          return;
+        }
+
+        buzzBtn.dataset.pending = "1";
+        buzzBtn.disabled = true;
+
+        // الأهم: لا ننتظر presence قبل الحسم
+        const claimPromise = claimBuzz(fixedTeamId, fixedPlayerName);
+
+        // presence بالخلفية فقط
+        attachPresence(local.currentSessionCode).catch((error) => {
+          console.error("Presence refresh error:", error);
+        });
+
+        const ok = await claimPromise;
 
         if (!ok) {
-          showToast("تم إغلاق الجولة أو سبق أن ضغطت", true);
+          showToast("تم إغلاق الجولة أو سبقك لاعب آخر", true);
+          buzzBtn.disabled = false;
         }
       } catch (error) {
         console.error(error);
         showToast("تعذر إرسال الضغط", true);
+        if (els.deviceBuzzBtn) {
+          els.deviceBuzzBtn.disabled = false;
+        }
+      } finally {
+        if (buzzBtn) {
+          buzzBtn.dataset.pending = "0";
+        }
       }
     });
   }

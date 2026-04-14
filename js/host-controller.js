@@ -129,22 +129,27 @@ export async function startTickWorker() {
 
       const session = normalizeSession(
         snapshot.val(),
-        local.currentSessionCode,
+        local.currentSessionCode
       );
 
       if (!session.timerRunning || !session.roundEndsAt) return;
 
-      const leftMs = Number(session.roundEndsAt) - Date.now();
+      const now = Date.now();
+      const leftMs = Number(session.roundEndsAt) - now;
       const nextLeft = Math.max(0, Math.ceil(leftMs / 1000));
 
-      if (nextLeft > 0 && nextLeft !== session.timeLeft) {
-        await updateSessionPatch({
-          timeLeft: nextLeft,
-        });
+      // ✅ تحديث فقط عند التغيير
+      if (nextLeft > 0) {
+        if (nextLeft !== session.timeLeft) {
+          await updateSessionPatch({
+            timeLeft: nextLeft,
+          });
+        }
         return;
       }
 
-      if (nextLeft <= 0) {
+      // ✅ انتهاء الوقت
+      if (nextLeft <= 0 && session.timerRunning) {
         const cooldownEnabled = Number(session.cooldown || 0) > 0;
 
         await updateSessionPatch({
@@ -154,23 +159,26 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
-          cooldownPlayerId: "",
+
+          //  منع الفريق كامل
           cooldownTeamId:
             cooldownEnabled && session.winnerTeamId !== null
               ? Number(session.winnerTeamId)
               : null,
+
           cooldownEndsAt:
             cooldownEnabled && session.winnerTeamId !== null
-              ? Date.now() + session.cooldown * 1000
+              ? now + session.cooldown * 1000
               : null,
+
           presses: null,
-          hostUpdatedAt: Date.now(),
+          hostUpdatedAt: now,
         });
       }
     } catch (error) {
       console.error(error);
     }
-  }, 500);
+  }, 1000); // 🔥 كان 500
 }
 
 function setSensitiveVisibility(visible) {

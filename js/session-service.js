@@ -131,20 +131,14 @@ export function getCurrentPlayerName() {
 
 export function isMyCooldownActive(session) {
   const selectedTeamId = getSelectedTeamId();
-  const byTeam =
+
+  return (
     Number.isFinite(selectedTeamId) &&
     session.cooldownTeamId !== null &&
     Number(session.cooldownTeamId) === Number(selectedTeamId) &&
     Boolean(session.cooldownEndsAt) &&
-    Date.now() < Number(session.cooldownEndsAt);
-
-  const byPlayer =
-    Boolean(session.cooldownPlayerId) &&
-    session.cooldownPlayerId === local.deviceId &&
-    Boolean(session.cooldownEndsAt) &&
-    Date.now() < Number(session.cooldownEndsAt);
-
-  return byTeam || byPlayer;
+    Date.now() < Number(session.cooldownEndsAt)
+  );
 }
 
 export function hasMyPressInCurrentRound(session) {
@@ -381,30 +375,18 @@ export async function openAllForPlayers() {
 export async function registerPress(teamId, playerName = "") {
   if (!local.currentSessionCode) return false;
 
-  const session = await readCurrentSession();
-
-  if (
-    session.locked ||
-    (session.winnerTeamId !== null && !session.answerExpired) ||
-    isMyCooldownActive(session) ||
-    hasMyPressInCurrentRound(session)
-  ) {
-    return false;
-  }
-
   const safePlayerName = sanitizeName(playerName) || "لاعب";
   const teamIdNum = Number(teamId);
 
   if (!Number.isFinite(teamIdNum)) return false;
 
-  await set(myPressRef(local.currentSessionCode), {
-    teamId: teamIdNum,
-    playerName: safePlayerName,
-    pressedAt: Date.now(),
-    roundId: Number(session.roundId || 1),
-  });
-
   await update(sessionRef(local.currentSessionCode), {
+    [`presses/${local.deviceId}`]: {
+      teamId: teamIdNum,
+      playerName: safePlayerName,
+      pressedAt: Date.now(),
+      roundId: Number((await readCurrentSession()).roundId || 1),
+    },
     updatedAt: Date.now(),
     expiresAt: Date.now() + SESSION_EXPIRY_MS,
   });
@@ -444,6 +426,7 @@ export async function claimBuzz(teamId, playerName = "") {
       const locked = Boolean(current.locked);
       const answerExpired = Boolean(current.answerExpired);
       const maxTime = Number(current.maxTime || 3);
+      const roundId = Number(current.roundId || 1);
       const cooldownTeamId =
         current.cooldownTeamId === null || current.cooldownTeamId === undefined
           ? null
@@ -465,6 +448,17 @@ export async function claimBuzz(teamId, playerName = "") {
       }
 
       const now = Date.now();
+      const nextPresses =
+        current.presses && typeof current.presses === "object"
+          ? { ...current.presses }
+          : {};
+
+      nextPresses[local.deviceId] = {
+        teamId: teamIdNum,
+        playerName: safePlayerName,
+        pressedAt: now,
+        roundId,
+      };
 
       return {
         ...current,
@@ -484,11 +478,11 @@ export async function claimBuzz(teamId, playerName = "") {
         updatedAt: now,
         hostUpdatedAt: now,
         expiresAt: now + SESSION_EXPIRY_MS,
-        presses: null,
+        presses: nextPresses,
       };
     },
     {
-      applyLocally: true,
+      applyLocally: false,
     },
   );
 
@@ -496,39 +490,7 @@ export async function claimBuzz(teamId, playerName = "") {
 }
 
 export async function resolveWinnerFromPresses() {
-  const session = await readCurrentSession();
-
-  if (
-    session.locked ||
-    (session.winnerTeamId !== null && !session.answerExpired)
-  ) {
-    return;
-  }
-
-  const presses = getSortedPresses(session);
-  if (presses.length === 0) return;
-
-  const firstPress = presses[0];
-
-  await update(sessionRef(local.currentSessionCode), {
-    winnerTeamId: Number(firstPress.teamId),
-    winnerPlayerName: String(firstPress.playerName || "لاعب"),
-    winnerPlayerId: String(firstPress.deviceId || ""),
-    winnerPressedAt: Number(firstPress.pressedAt || Date.now()),
-    locked: true,
-    timerRunning: true,
-    answerExpired: false,
-    roundStartedAt: Date.now(),
-    roundEndsAt: Date.now() + (session.maxTime || 3) * 1000,
-    timeLeft: session.maxTime || 3,
-    presses: null,
-    cooldownPlayerId: "",
-    cooldownTeamId: null,
-    cooldownEndsAt: null,
-    updatedAt: Date.now(),
-    hostUpdatedAt: Date.now(),
-    expiresAt: Date.now() + SESSION_EXPIRY_MS,
-  });
+  return;
 }
 
 export async function addPoint() {

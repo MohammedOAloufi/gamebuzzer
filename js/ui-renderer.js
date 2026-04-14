@@ -284,8 +284,10 @@ export function renderHostBuzzButtons(session) {
       </div>
 
       ${
-        currentPress && !isWinner
-          ? `<div class="team-winner-indicator">تم تسجيل ضغطة</div>`
+        currentPress
+          ? `<div class="team-winner-indicator">${
+              isWinner ? "أول ضغطة معتمدة" : "تم تسجيل ضغطة"
+            }</div>`
           : ""
       }
 
@@ -541,12 +543,20 @@ export function renderSession(session) {
 
   updateQRCode(session.code);
 
-  const progress =
-    session.maxTime > 0 ? (session.timeLeft / session.maxTime) * 100 : 0;
+  const now = Date.now();
+  let displayTime = Number(session.timeLeft || 0);
 
-  if (els.timeLeftText) els.timeLeftText.textContent = String(session.timeLeft);
-  if (els.timerBig) els.timerBig.textContent = String(session.timeLeft);
-  if (els.answerTimeBig) els.answerTimeBig.textContent = String(session.timeLeft);
+  if (session.timerRunning && session.roundEndsAt) {
+    const leftMs = Number(session.roundEndsAt) - now;
+    displayTime = Math.max(0, Math.ceil(leftMs / 1000));
+  }
+
+  const progress =
+    session.maxTime > 0 ? (displayTime / session.maxTime) * 100 : 0;
+
+  if (els.timeLeftText) els.timeLeftText.textContent = String(displayTime);
+  if (els.timerBig) els.timerBig.textContent = String(displayTime);
+  if (els.answerTimeBig) els.answerTimeBig.textContent = String(displayTime);
 
   if (els.cooldownTimeLeft) {
     els.cooldownTimeLeft.textContent = String(getCooldownSecondsLeft(session));

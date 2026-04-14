@@ -154,9 +154,13 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
-          cooldownPlayerId: cooldownEnabled ? session.winnerPlayerId || "" : "",
+          cooldownPlayerId: "",
+          cooldownTeamId:
+            cooldownEnabled && session.winnerTeamId !== null
+              ? Number(session.winnerTeamId)
+              : null,
           cooldownEndsAt:
-            cooldownEnabled && session.winnerPlayerId
+            cooldownEnabled && session.winnerTeamId !== null
               ? Date.now() + session.cooldown * 1000
               : null,
           presses: null,

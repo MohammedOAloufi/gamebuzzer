@@ -652,11 +652,11 @@ export function startUiTicker() {
     );
 
     if (
-      session.cooldownPlayerId &&
+      session.cooldownTeamId !== null &&
       session.cooldownEndsAt &&
       Date.now() >= Number(session.cooldownEndsAt)
     ) {
-      session.cooldownPlayerId = "";
+      session.cooldownTeamId = null;
       session.cooldownEndsAt = null;
     }
 

@@ -75,6 +75,10 @@ export function normalizeSession(raw, code) {
     cooldown: Number.isFinite(parsedCooldown) ? parsedCooldown : 0,
     cooldownEndsAt: raw?.cooldownEndsAt ?? null,
     cooldownPlayerId: String(raw?.cooldownPlayerId || ""),
+    cooldownTeamId:
+      raw?.cooldownTeamId === null || raw?.cooldownTeamId === undefined
+        ? null
+        : Number(raw.cooldownTeamId),
     presence:
       raw?.presence && typeof raw.presence === "object" ? raw.presence : {},
     presses: Object.entries(safePresses).reduce((acc, [deviceId, press]) => {
@@ -126,12 +130,21 @@ export function getCurrentPlayerName() {
 }
 
 export function isMyCooldownActive(session) {
-  return (
+  const selectedTeamId = getSelectedTeamId();
+  const byTeam =
+    Number.isFinite(selectedTeamId) &&
+    session.cooldownTeamId !== null &&
+    Number(session.cooldownTeamId) === Number(selectedTeamId) &&
+    Boolean(session.cooldownEndsAt) &&
+    Date.now() < Number(session.cooldownEndsAt);
+
+  const byPlayer =
     Boolean(session.cooldownPlayerId) &&
     session.cooldownPlayerId === local.deviceId &&
     Boolean(session.cooldownEndsAt) &&
-    Date.now() < Number(session.cooldownEndsAt)
-  );
+    Date.now() < Number(session.cooldownEndsAt);
+
+  return byTeam || byPlayer;
 }
 
 export function hasMyPressInCurrentRound(session) {
@@ -230,6 +243,7 @@ export async function ensureSession(code) {
       cooldown: 0,
       cooldownEndsAt: null,
       cooldownPlayerId: "",
+      cooldownTeamId: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       hostUpdatedAt: Date.now(),
@@ -262,6 +276,14 @@ export async function ensureSession(code) {
 
   if (!Number.isFinite(Number(current.roundId))) {
     patch.roundId = 1;
+  }
+
+  if (
+    current.cooldownTeamId !== null &&
+    current.cooldownTeamId !== undefined &&
+    !Number.isFinite(Number(current.cooldownTeamId))
+  ) {
+    patch.cooldownTeamId = null;
   }
 
   if (Object.keys(patch).length > 0) {
@@ -342,6 +364,7 @@ export async function clearWinner() {
   await resetToFreshRound(session, {
     cooldownEndsAt: null,
     cooldownPlayerId: "",
+    cooldownTeamId: null,
   });
 }
 
@@ -351,6 +374,7 @@ export async function openAllForPlayers() {
   await resetToFreshRound(session, {
     cooldownEndsAt: null,
     cooldownPlayerId: "",
+    cooldownTeamId: null,
   });
 }
 
@@ -419,21 +443,23 @@ export async function claimBuzz(teamId, playerName = "") {
 
       const locked = Boolean(current.locked);
       const answerExpired = Boolean(current.answerExpired);
-      const roundId = Number(current.roundId || 1);
       const maxTime = Number(current.maxTime || 3);
-      const cooldown = Number(current.cooldown || 0);
-      const cooldownPlayerId = String(current.cooldownPlayerId || "");
+      const cooldownTeamId =
+        current.cooldownTeamId === null || current.cooldownTeamId === undefined
+          ? null
+          : Number(current.cooldownTeamId);
       const cooldownEndsAt = current.cooldownEndsAt ?? null;
 
-      const myCooldownActive =
-        cooldownPlayerId === local.deviceId &&
+      const myTeamCooldownActive =
+        cooldownTeamId !== null &&
+        cooldownTeamId === teamIdNum &&
         Boolean(cooldownEndsAt) &&
         Date.now() < Number(cooldownEndsAt);
 
       if (
         locked ||
         (currentWinner !== null && !answerExpired) ||
-        myCooldownActive
+        myTeamCooldownActive
       ) {
         return;
       }
@@ -453,6 +479,7 @@ export async function claimBuzz(teamId, playerName = "") {
         roundEndsAt: now + maxTime * 1000,
         timeLeft: maxTime,
         cooldownPlayerId: "",
+        cooldownTeamId: null,
         cooldownEndsAt: null,
         updatedAt: now,
         hostUpdatedAt: now,
@@ -496,6 +523,7 @@ export async function resolveWinnerFromPresses() {
     timeLeft: session.maxTime || 3,
     presses: null,
     cooldownPlayerId: "",
+    cooldownTeamId: null,
     cooldownEndsAt: null,
     updatedAt: Date.now(),
     hostUpdatedAt: Date.now(),
@@ -517,6 +545,7 @@ export async function addPoint() {
     teams,
     cooldownEndsAt: null,
     cooldownPlayerId: "",
+    cooldownTeamId: null,
   });
 }
 
@@ -595,6 +624,12 @@ export async function removeTeam(teamId) {
     patch.roundId = Number(session.roundId || 1) + 1;
     patch.presses = null;
     patch.timeLeft = session.maxTime || 3;
+  }
+
+  if (Number(session.cooldownTeamId) === Number(teamId)) {
+    patch.cooldownTeamId = null;
+    patch.cooldownPlayerId = "";
+    patch.cooldownEndsAt = null;
   }
 
   await updateSessionPatch(patch);

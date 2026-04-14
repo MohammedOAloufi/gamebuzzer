@@ -31,6 +31,62 @@ function playAudioSafe(audioEl) {
   }
 }
 
+function ensureCountdownPool(audioEl) {
+  if (!audioEl) return [];
+
+  if (ensureCountdownPool._pool?.length) {
+    return ensureCountdownPool._pool;
+  }
+
+  const src =
+    audioEl.currentSrc ||
+    audioEl.querySelector("source")?.src ||
+    audioEl.getAttribute("src") ||
+    "";
+
+  if (!src) {
+    ensureCountdownPool._pool = [audioEl];
+    return ensureCountdownPool._pool;
+  }
+
+  const pool = [];
+
+  for (let i = 0; i < 6; i += 1) {
+    const tick = new Audio(src);
+    tick.preload = "auto";
+    tick.volume = audioEl.volume;
+    tick.playbackRate = audioEl.playbackRate || 1;
+    pool.push(tick);
+  }
+
+  ensureCountdownPool._pool = pool;
+  ensureCountdownPool._index = 0;
+  return pool;
+}
+
+function playCountdownTick(audioEl) {
+  if (!audioEl) return;
+
+  try {
+    const pool = ensureCountdownPool(audioEl);
+    if (!pool.length) return;
+
+    const currentIndex = Number(ensureCountdownPool._index || 0) % pool.length;
+    const tick = pool[currentIndex];
+    ensureCountdownPool._index = (currentIndex + 1) % pool.length;
+
+    tick.pause();
+    tick.currentTime = 0;
+
+    const playPromise = tick.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 function cloneSoundSession(session) {
   return {
     code: String(session.code || ""),
@@ -64,7 +120,7 @@ function formatCountdownValue(value, showDecimal = false) {
   return safeValue.toFixed(1);
 }
 
-function syncHostSounds(session) {
+function syncHostSounds(session, displayTimeRaw = null, locallyFinished = false) {
   if (pageType !== "host") return;
 
   const prevSession = syncHostSounds._prevSession || null;
@@ -75,29 +131,29 @@ function syncHostSounds(session) {
     Number(session.roundStartedAt || 0),
   ].join(":");
 
-  const currentTimeLeft = Number(session.timeLeft || 0);
-  const maxTime = Number(session.maxTime || 0);
+  const effectiveDisplayTime =
+    displayTimeRaw === null || displayTimeRaw === undefined
+      ? Number(session.timeLeft || 0)
+      : Number(displayTimeRaw || 0);
 
   if (
     session.timerRunning &&
     !session.answerExpired &&
     session.winnerTeamId !== null &&
-    Number.isFinite(currentTimeLeft) &&
-    Number.isFinite(maxTime) &&
-    currentTimeLeft > 0 &&
-    currentTimeLeft <= maxTime
+    Number.isFinite(effectiveDisplayTime) &&
+    effectiveDisplayTime > 0
   ) {
+    const currentSecond = Math.max(1, Math.ceil(effectiveDisplayTime));
+
     if (syncHostSounds._roundKey !== currentRoundKey) {
       syncHostSounds._roundKey = currentRoundKey;
-      syncHostSounds._lastTickSecond = null;
-    }
-
-    if (syncHostSounds._lastTickSecond === null) {
-      playAudioSafe(els.countdownTickAudio);
-      syncHostSounds._lastTickSecond = currentTimeLeft;
-    } else if (currentTimeLeft < syncHostSounds._lastTickSecond) {
-      playAudioSafe(els.countdownTickAudio);
-      syncHostSounds._lastTickSecond = currentTimeLeft;
+      syncHostSounds._lastTickSecond = currentSecond;
+      playCountdownTick(els.countdownTickAudio);
+    } else if (currentSecond !== syncHostSounds._lastTickSecond) {
+      if (currentSecond < syncHostSounds._lastTickSecond) {
+        playCountdownTick(els.countdownTickAudio);
+      }
+      syncHostSounds._lastTickSecond = currentSecond;
     }
   } else {
     syncHostSounds._roundKey = "";
@@ -105,13 +161,28 @@ function syncHostSounds(session) {
   }
 
   if (prevSession) {
-    const timeEndedNow =
-      prevSession.answerExpired === false &&
-      session.answerExpired === true &&
-      prevSession.winnerTeamId !== null;
+    const currentEndKey = [
+      String(session.code || ""),
+      Number(session.roundId || 1),
+      String(session.winnerPlayerId || ""),
+    ].join(":");
 
-    if (timeEndedNow) {
+    const timeEndedNow =
+      (prevSession.answerExpired === false &&
+        session.answerExpired === true &&
+        prevSession.winnerTeamId !== null) ||
+      (prevSession.timerRunning === true &&
+        (session.timerRunning === false || locallyFinished) &&
+        prevSession.winnerTeamId !== null &&
+        Number(prevSession.timeLeft || 0) > 0);
+
+    if (timeEndedNow && syncHostSounds._endedKeyPlayed !== currentEndKey) {
       playAudioSafe(els.endTimeAudio);
+      syncHostSounds._endedKeyPlayed = currentEndKey;
+    }
+
+    if (!timeEndedNow && syncHostSounds._endedKeyPlayed !== currentEndKey) {
+      syncHostSounds._endedKeyPlayed = "";
     }
 
     const previousPointsByTeam = new Map(
@@ -675,7 +746,7 @@ export function renderSession(session) {
   }
 
   renderPlayerTeam(session);
-  syncHostSounds(session);
+  syncHostSounds(session, displayTimeRaw, locallyFinished);
 }
 
 export function startUiTicker() {

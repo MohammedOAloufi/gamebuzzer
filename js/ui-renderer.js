@@ -120,7 +120,7 @@ function formatCountdownValue(value, showDecimal = false) {
   return safeValue.toFixed(1);
 }
 
-function syncHostSounds(session, displayTimeRaw = null, locallyFinished = false) {
+function syncHostSounds(session, displayTimeRaw = null) {
   if (pageType !== "host") return;
 
   const prevSession = syncHostSounds._prevSession || null;
@@ -161,30 +161,6 @@ function syncHostSounds(session, displayTimeRaw = null, locallyFinished = false)
   }
 
   if (prevSession) {
-    const currentEndKey = [
-      String(session.code || ""),
-      Number(session.roundId || 1),
-      String(session.winnerPlayerId || ""),
-    ].join(":");
-
-    const timeEndedNow =
-      (prevSession.answerExpired === false &&
-        session.answerExpired === true &&
-        prevSession.winnerTeamId !== null) ||
-      (prevSession.timerRunning === true &&
-        (session.timerRunning === false || locallyFinished) &&
-        prevSession.winnerTeamId !== null &&
-        Number(prevSession.timeLeft || 0) > 0);
-
-    if (timeEndedNow && syncHostSounds._endedKeyPlayed !== currentEndKey) {
-      playAudioSafe(els.endTimeAudio);
-      syncHostSounds._endedKeyPlayed = currentEndKey;
-    }
-
-    if (!timeEndedNow && syncHostSounds._endedKeyPlayed !== currentEndKey) {
-      syncHostSounds._endedKeyPlayed = "";
-    }
-
     const previousPointsByTeam = new Map(
       (prevSession.teams || []).map((team) => [
         Number(team.id),
@@ -746,7 +722,7 @@ export function renderSession(session) {
   }
 
   renderPlayerTeam(session);
-  syncHostSounds(session, displayTimeRaw, locallyFinished);
+  syncHostSounds(session, displayTimeRaw);
 }
 
 export function startUiTicker() {

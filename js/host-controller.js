@@ -22,6 +22,31 @@ import {
 import { showToast } from "./ui-renderer.js";
 import { createOrLoadSession } from "./session-runtime.js";
 
+function playAudioSafe(audioEl) {
+  if (!audioEl) return;
+
+  try {
+    audioEl.pause();
+    audioEl.currentTime = 0;
+
+    const playPromise = audioEl.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function buildRoundAudioKey(session) {
+  return [
+    String(session.code || local.currentSessionCode || ""),
+    Number(session.roundId || 1),
+    String(session.winnerPlayerId || ""),
+    Number(session.roundStartedAt || 0),
+  ].join(":");
+}
+
 export async function syncHostSettings() {
   if (!local.currentSessionCode) return;
 
@@ -135,6 +160,12 @@ export async function startTickWorker() {
 
       if (leftMs <= 0) {
         const cooldownEnabled = Number(session.cooldown || 0) > 0;
+        const roundAudioKey = buildRoundAudioKey(session);
+
+        if (startTickWorker._lastEndSoundKey !== roundAudioKey) {
+          playAudioSafe(els.endTimeAudio);
+          startTickWorker._lastEndSoundKey = roundAudioKey;
+        }
 
         await updateSessionPatch({
           timeLeft: 0,

@@ -153,9 +153,31 @@ export async function startTickWorker() {
         local.currentSessionCode,
       );
 
+      const now = Date.now();
+
+      // المشرف هو من يبدأ المؤقت الرسمي
+      if (
+        session.winnerTeamId !== null &&
+        !session.timerRunning &&
+        !session.answerExpired &&
+        !session.roundEndsAt &&
+        !session.roundStartedAt
+      ) {
+        const maxTime = Number(session.maxTime || 3);
+
+        await updateSessionPatch({
+          timerRunning: true,
+          roundStartedAt: now,
+          roundEndsAt: now + maxTime * 1000,
+          timeLeft: maxTime,
+          hostUpdatedAt: now,
+        });
+
+        return;
+      }
+
       if (!session.timerRunning || !session.roundEndsAt) return;
 
-      const now = Date.now();
       const leftMs = Number(session.roundEndsAt) - now;
 
       if (leftMs <= 0) {

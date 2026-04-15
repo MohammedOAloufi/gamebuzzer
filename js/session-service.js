@@ -232,6 +232,8 @@ export async function ensureSession(code) {
       winnerPlayerName: "",
       winnerPlayerId: "",
       winnerPressedAt: null,
+      roundStartedAt: null,
+      roundEndsAt: null,
       teams: defaultTeams(),
       presses: null,
       cooldown: 0,
@@ -425,7 +427,6 @@ export async function claimBuzz(teamId, playerName = "") {
 
       const locked = Boolean(current.locked);
       const answerExpired = Boolean(current.answerExpired);
-      const maxTime = Number(current.maxTime || 3);
       const roundId = Number(current.roundId || 1);
       const cooldownTeamId =
         current.cooldownTeamId === null || current.cooldownTeamId === undefined
@@ -448,6 +449,7 @@ export async function claimBuzz(teamId, playerName = "") {
       }
 
       const now = Date.now();
+      const maxTime = Number(current.maxTime || 3);
       const nextPresses =
         current.presses && typeof current.presses === "object"
           ? { ...current.presses }
@@ -467,10 +469,10 @@ export async function claimBuzz(teamId, playerName = "") {
         winnerPlayerId: local.deviceId,
         winnerPressedAt: now,
         locked: true,
-        timerRunning: true,
+        timerRunning: false,
         answerExpired: false,
-        roundStartedAt: now,
-        roundEndsAt: now + maxTime * 1000,
+        roundStartedAt: null,
+        roundEndsAt: null,
         timeLeft: maxTime,
         cooldownPlayerId: "",
         cooldownTeamId: null,

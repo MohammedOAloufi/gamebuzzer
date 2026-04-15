@@ -1,4 +1,5 @@
 import { createDeviceId } from "./utils.js";
+import { db, ref, onValue } from "./firebase.js";
 
 export const TEAM_COLORS = [
   "team-blue",
@@ -40,4 +41,24 @@ export const local = {
   lastTeamsRenderKey: "",
   playerHeartbeat: null,
   hostHeartbeat: null,
+  serverTimeOffsetMs: 0,
+  serverClockReady: false,
 };
+
+export function getServerNow() {
+  return Date.now() + Number(local.serverTimeOffsetMs || 0);
+}
+
+const serverOffsetRef = ref(db, ".info/serverTimeOffset");
+
+onValue(
+  serverOffsetRef,
+  (snapshot) => {
+    local.serverTimeOffsetMs = Number(snapshot.val() || 0);
+    local.serverClockReady = true;
+  },
+  () => {
+    local.serverTimeOffsetMs = 0;
+    local.serverClockReady = false;
+  },
+);

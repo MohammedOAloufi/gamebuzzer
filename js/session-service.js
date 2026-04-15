@@ -1,5 +1,10 @@
 import { db, ref, set, update, get, runTransaction } from "./firebase.js";
-import { TEAM_COLORS, SESSION_EXPIRY_MS, local } from "./state.js";
+import {
+  TEAM_COLORS,
+  SESSION_EXPIRY_MS,
+  local,
+  getServerNow,
+} from "./state.js";
 import { sanitizeName, getTeamDisplayNameByColor } from "./utils.js";
 import { els } from "./dom.js";
 
@@ -131,13 +136,14 @@ export function getCurrentPlayerName() {
 
 export function isMyCooldownActive(session) {
   const selectedTeamId = getSelectedTeamId();
+  const serverNow = getServerNow();
 
   return (
     Number.isFinite(selectedTeamId) &&
     session.cooldownTeamId !== null &&
     Number(session.cooldownTeamId) === Number(selectedTeamId) &&
     Boolean(session.cooldownEndsAt) &&
-    Date.now() < Number(session.cooldownEndsAt)
+    serverNow < Number(session.cooldownEndsAt)
   );
 }
 
@@ -161,9 +167,11 @@ export function canBuzz(session) {
 export function getCooldownSecondsLeft(session) {
   if (!isMyCooldownActive(session)) return 0;
 
+  const serverNow = getServerNow();
+
   return Math.max(
     0,
-    Math.ceil((Number(session.cooldownEndsAt) - Date.now()) / 1000),
+    Math.ceil((Number(session.cooldownEndsAt) - serverNow) / 1000),
   );
 }
 
@@ -200,7 +208,7 @@ export async function deleteSessionIfExpired(code) {
   const data = snapshot.val();
   const expiresAt = Number(data?.expiresAt || 0);
 
-  if (expiresAt && Date.now() > expiresAt) {
+  if (expiresAt && getServerNow() > expiresAt) {
     await set(sessionRef(code), null);
     return true;
   }
@@ -220,6 +228,8 @@ export async function ensureSession(code) {
   const snapshot = await get(sessionRef(codeClean));
 
   if (!snapshot.exists()) {
+    const serverNow = getServerNow();
+
     await set(sessionRef(codeClean), {
       code: codeClean,
       locked: false,
@@ -240,10 +250,10 @@ export async function ensureSession(code) {
       cooldownEndsAt: null,
       cooldownPlayerId: "",
       cooldownTeamId: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      hostUpdatedAt: Date.now(),
-      expiresAt: Date.now() + SESSION_EXPIRY_MS,
+      createdAt: serverNow,
+      updatedAt: serverNow,
+      hostUpdatedAt: serverNow,
+      expiresAt: serverNow + SESSION_EXPIRY_MS,
     });
 
     return codeClean;
@@ -283,8 +293,9 @@ export async function ensureSession(code) {
   }
 
   if (Object.keys(patch).length > 0) {
-    patch.updatedAt = Date.now();
-    patch.expiresAt = Date.now() + SESSION_EXPIRY_MS;
+    const serverNow = getServerNow();
+    patch.updatedAt = serverNow;
+    patch.expiresAt = serverNow + SESSION_EXPIRY_MS;
     await update(sessionRef(codeClean), patch);
   }
 
@@ -294,9 +305,11 @@ export async function ensureSession(code) {
 export async function refreshSessionExpiry() {
   if (!local.currentSessionCode) return;
 
+  const serverNow = getServerNow();
+
   await update(sessionRef(local.currentSessionCode), {
-    expiresAt: Date.now() + SESSION_EXPIRY_MS,
-    updatedAt: Date.now(),
+    expiresAt: serverNow + SESSION_EXPIRY_MS,
+    updatedAt: serverNow,
   });
 }
 
@@ -319,10 +332,12 @@ export async function updateSessionPatch(patch) {
     throw new Error("لا توجد جلسة حالية");
   }
 
+  const serverNow = getServerNow();
+
   await update(sessionRef(local.currentSessionCode), {
     ...patch,
-    updatedAt: Date.now(),
-    expiresAt: Date.now() + SESSION_EXPIRY_MS,
+    updatedAt: serverNow,
+    expiresAt: serverNow + SESSION_EXPIRY_MS,
   });
 }
 
@@ -341,16 +356,14 @@ export async function resetToFreshRound(session, extraPatch = {}) {
     presses: null,
     timeLeft: session.maxTime || Number(els.timeSelector?.value || 3),
     ...extraPatch,
-    hostUpdatedAt: Date.now(),
+    hostUpdatedAt: getServerNow(),
   });
 }
 
 export async function toggleLock() {
-  const session = await readCurrentSession();
-
   await updateSessionPatch({
-    locked: !session.locked,
-    hostUpdatedAt: Date.now(),
+    locked: !(await readCurrentSession()).locked,
+    hostUpdatedAt: getServerNow(),
   });
 }
 
@@ -382,15 +395,18 @@ export async function registerPress(teamId, playerName = "") {
 
   if (!Number.isFinite(teamIdNum)) return false;
 
+  const serverNow = getServerNow();
+  const currentSession = await readCurrentSession();
+
   await update(sessionRef(local.currentSessionCode), {
     [`presses/${local.deviceId}`]: {
       teamId: teamIdNum,
       playerName: safePlayerName,
-      pressedAt: Date.now(),
-      roundId: Number((await readCurrentSession()).roundId || 1),
+      pressedAt: serverNow,
+      roundId: Number(currentSession.roundId || 1),
     },
-    updatedAt: Date.now(),
-    expiresAt: Date.now() + SESSION_EXPIRY_MS,
+    updatedAt: serverNow,
+    expiresAt: serverNow + SESSION_EXPIRY_MS,
   });
 
   return true;
@@ -433,12 +449,13 @@ export async function claimBuzz(teamId, playerName = "") {
           ? null
           : Number(current.cooldownTeamId);
       const cooldownEndsAt = current.cooldownEndsAt ?? null;
+      const serverNow = getServerNow();
 
       const myTeamCooldownActive =
         cooldownTeamId !== null &&
         cooldownTeamId === teamIdNum &&
         Boolean(cooldownEndsAt) &&
-        Date.now() < Number(cooldownEndsAt);
+        serverNow < Number(cooldownEndsAt);
 
       if (
         locked ||
@@ -448,7 +465,6 @@ export async function claimBuzz(teamId, playerName = "") {
         return;
       }
 
-      const now = Date.now();
       const maxTime = Number(current.maxTime || 3);
       const nextPresses =
         current.presses && typeof current.presses === "object"
@@ -458,7 +474,7 @@ export async function claimBuzz(teamId, playerName = "") {
       nextPresses[local.deviceId] = {
         teamId: teamIdNum,
         playerName: safePlayerName,
-        pressedAt: now,
+        pressedAt: serverNow,
         roundId,
       };
 
@@ -467,7 +483,7 @@ export async function claimBuzz(teamId, playerName = "") {
         winnerTeamId: teamIdNum,
         winnerPlayerName: safePlayerName,
         winnerPlayerId: local.deviceId,
-        winnerPressedAt: now,
+        winnerPressedAt: serverNow,
         locked: true,
         timerRunning: false,
         answerExpired: false,
@@ -477,9 +493,9 @@ export async function claimBuzz(teamId, playerName = "") {
         cooldownPlayerId: "",
         cooldownTeamId: null,
         cooldownEndsAt: null,
-        updatedAt: now,
-        hostUpdatedAt: now,
-        expiresAt: now + SESSION_EXPIRY_MS,
+        updatedAt: serverNow,
+        hostUpdatedAt: serverNow,
+        expiresAt: serverNow + SESSION_EXPIRY_MS,
         presses: nextPresses,
       };
     },
@@ -524,13 +540,13 @@ export async function changeTeamPoints(teamId, amount) {
 
   await updateSessionPatch({
     teams,
-    hostUpdatedAt: Date.now(),
+    hostUpdatedAt: getServerNow(),
   });
 }
 
 export async function addTeam() {
   const session = await readCurrentSession();
-  const nextId = Date.now();
+  const nextId = getServerNow();
 
   const usedColors = session.teams.map((team) => team.colorClass);
   const availableColors = TEAM_COLORS.filter(
@@ -556,7 +572,7 @@ export async function addTeam() {
 
   await updateSessionPatch({
     teams,
-    hostUpdatedAt: Date.now(),
+    hostUpdatedAt: getServerNow(),
   });
 
   return autoName;
@@ -572,7 +588,7 @@ export async function removeTeam(teamId) {
   const teams = session.teams.filter((team) => team.id !== teamId);
   const patch = {
     teams,
-    hostUpdatedAt: Date.now(),
+    hostUpdatedAt: getServerNow(),
   };
 
   if (session.winnerTeamId === teamId) {
@@ -611,6 +627,6 @@ export async function updateTeamName(teamId, name) {
 
   await updateSessionPatch({
     teams,
-    hostUpdatedAt: Date.now(),
+    hostUpdatedAt: getServerNow(),
   });
 }

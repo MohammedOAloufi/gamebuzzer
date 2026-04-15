@@ -1,5 +1,5 @@
 import { els } from "./dom.js";
-import { local, pageType } from "./state.js";
+import { local, pageType, getServerNow } from "./state.js";
 import { escapeHtml, getPlayerJoinUrl } from "./utils.js";
 import {
   canBuzz,
@@ -600,14 +600,14 @@ export function renderSession(session) {
 
   updateQRCode(session.code);
 
-  const now = Date.now();
+  const serverNow = getServerNow();
 
   let displayTimeRaw = Number(session.timeLeft || session.maxTime || 0);
   let showDecimalTime = false;
   let locallyFinished = false;
 
   if (session.timerRunning && session.roundEndsAt) {
-    const leftMs = Number(session.roundEndsAt) - now;
+    const leftMs = Number(session.roundEndsAt) - serverNow;
     displayTimeRaw = Math.max(0, leftMs / 1000);
     showDecimalTime = true;
     locallyFinished = leftMs <= 0;
@@ -740,7 +740,7 @@ export function startUiTicker() {
     if (
       session.cooldownTeamId !== null &&
       session.cooldownEndsAt &&
-      Date.now() >= Number(session.cooldownEndsAt)
+      getServerNow() >= Number(session.cooldownEndsAt)
     ) {
       session.cooldownTeamId = null;
       session.cooldownEndsAt = null;

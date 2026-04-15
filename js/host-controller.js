@@ -5,6 +5,7 @@ import {
   PLAYER_ACTIVE_WINDOW_MS,
   SESSION_IDLE_DELETE_MS,
   HOST_HEARTBEAT_MS,
+  getServerNow,
 } from "./state.js";
 import { get, set } from "./firebase.js";
 import { getPlayerJoinUrl, randomCode } from "./utils.js";
@@ -58,7 +59,7 @@ export async function syncHostSettings() {
     const patch = {
       maxTime: newMaxTime,
       cooldown: newCooldown,
-      hostUpdatedAt: Date.now(),
+      hostUpdatedAt: getServerNow(),
     };
 
     if (!session.timerRunning) {
@@ -88,7 +89,7 @@ export function startHostHeartbeat() {
       if (!local.currentSessionCode) return;
 
       await updateSessionPatch({
-        hostUpdatedAt: Date.now(),
+        hostUpdatedAt: getServerNow(),
       });
     } catch (error) {
       console.error("Host heartbeat error:", error);
@@ -105,10 +106,10 @@ export async function cleanupInactiveSession() {
 
     const session = normalizeSession(snapshot.val(), local.currentSessionCode);
     const presenceValues = Object.values(session.presence || {});
-    const now = Date.now();
+    const serverNow = getServerNow();
 
     const activePlayers = presenceValues.filter(
-      (player) => now - Number(player?.at || 0) < PLAYER_ACTIVE_WINDOW_MS,
+      (player) => serverNow - Number(player?.at || 0) < PLAYER_ACTIVE_WINDOW_MS,
     );
 
     const lastActivity = Math.max(
@@ -119,9 +120,9 @@ export async function cleanupInactiveSession() {
       ...presenceValues.map((p) => Number(p?.at || 0)),
     );
 
-    const sessionIsIdle = now - lastActivity > SESSION_IDLE_DELETE_MS;
+    const sessionIsIdle = serverNow - lastActivity > SESSION_IDLE_DELETE_MS;
     const sessionExpired =
-      Boolean(session.expiresAt) && now > Number(session.expiresAt);
+      Boolean(session.expiresAt) && serverNow > Number(session.expiresAt);
 
     if ((activePlayers.length === 0 && sessionIsIdle) || sessionExpired) {
       await set(sessionRef(local.currentSessionCode), null);
@@ -153,9 +154,8 @@ export async function startTickWorker() {
         local.currentSessionCode,
       );
 
-      const now = Date.now();
+      const serverNow = getServerNow();
 
-      // المشرف هو من يبدأ المؤقت الرسمي
       if (
         session.winnerTeamId !== null &&
         !session.timerRunning &&
@@ -167,10 +167,10 @@ export async function startTickWorker() {
 
         await updateSessionPatch({
           timerRunning: true,
-          roundStartedAt: now,
-          roundEndsAt: now + maxTime * 1000,
+          roundStartedAt: serverNow,
+          roundEndsAt: serverNow + maxTime * 1000,
           timeLeft: maxTime,
-          hostUpdatedAt: now,
+          hostUpdatedAt: serverNow,
         });
 
         return;
@@ -178,7 +178,7 @@ export async function startTickWorker() {
 
       if (!session.timerRunning || !session.roundEndsAt) return;
 
-      const leftMs = Number(session.roundEndsAt) - now;
+      const leftMs = Number(session.roundEndsAt) - serverNow;
 
       if (leftMs <= 0) {
         const cooldownEnabled = Number(session.cooldown || 0) > 0;
@@ -202,10 +202,10 @@ export async function startTickWorker() {
               : null,
           cooldownEndsAt:
             cooldownEnabled && session.winnerTeamId !== null
-              ? now + session.cooldown * 1000
+              ? serverNow + session.cooldown * 1000
               : null,
           presses: null,
-          hostUpdatedAt: now,
+          hostUpdatedAt: serverNow,
         });
 
         return;

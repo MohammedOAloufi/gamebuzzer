@@ -44,15 +44,11 @@ export const local = {
   serverTimeOffsetMs: 0,
   serverClockReady: false,
 
-  // player buzz control
-  playerBuzzPending: false,
-  playerBuzzThrottleUntil: 0,
-  playerPendingStartedAt: 0,
-  lastPlayerRoundUiKey: "",
+  // player buzz state
+  playerBuzzInFlight: false,
+  playerAttemptRoundId: null,
+  playerUiRoundId: null,
   lastSeenForceUnlockToken: 0,
-
-  // allow only one local attempt per round
-  lastBuzzAttemptRoundId: null,
 };
 
 export function getServerNow() {

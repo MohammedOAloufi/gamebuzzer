@@ -195,65 +195,31 @@ function syncHostSounds(session, displayTimeRaw = null) {
   syncHostSounds._prevSession = cloneSoundSession(session);
 }
 
-function clearPlayerPendingState() {
-  local.playerBuzzPending = false;
-  local.playerPendingStartedAt = 0;
+function clearPlayerRoundState() {
+  local.playerBuzzInFlight = false;
+  local.playerAttemptRoundId = null;
 
-  if (!els.deviceBuzzBtn) return;
-
-  els.deviceBuzzBtn.dataset.pending = "0";
+  if (els.deviceBuzzBtn) {
+    els.deviceBuzzBtn.dataset.pending = "0";
+  }
 }
 
 function resetPlayerBuzzUiState(session) {
   if (!els.deviceBuzzBtn) return;
 
-  const newRoundId = Number(session.roundId || 1);
-  const roundUiKey = [
-    String(session.code || ""),
-    newRoundId,
-    Number(session.winnerTeamId ?? -1),
-    String(session.winnerPlayerId || ""),
-    Boolean(session.locked),
-    Boolean(session.timerRunning),
-    Boolean(session.answerExpired),
-    Number(session.cooldownTeamId ?? -1),
-  ].join(":");
-
-  const roundIsFresh =
-    session.winnerTeamId === null &&
-    !session.locked &&
-    !session.timerRunning &&
-    !session.answerExpired;
-
+  const currentRoundId = Number(session.roundId || 1);
   const forceUnlockChanged =
     Number(session.forceUnlockToken || 0) !==
     Number(local.lastSeenForceUnlockToken || 0);
 
   if (forceUnlockChanged) {
     local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
-    local.lastBuzzAttemptRoundId = null;
-    clearPlayerPendingState();
+    clearPlayerRoundState();
   }
 
-  if (local.lastPlayerRoundUiKey !== roundUiKey) {
-    local.lastPlayerRoundUiKey = roundUiKey;
-    clearPlayerPendingState();
-  }
-
-  if (Number(local.lastBuzzAttemptRoundId) !== newRoundId) {
-    local.lastBuzzAttemptRoundId = null;
-  }
-
-  if (roundIsFresh) {
-    clearPlayerPendingState();
-  }
-
-  if (
-    local.playerBuzzPending &&
-    Number(local.playerPendingStartedAt || 0) > 0 &&
-    Date.now() - Number(local.playerPendingStartedAt || 0) > 2500
-  ) {
-    clearPlayerPendingState();
+  if (local.playerUiRoundId !== currentRoundId) {
+    local.playerUiRoundId = currentRoundId;
+    clearPlayerRoundState();
   }
 }
 
@@ -750,18 +716,15 @@ export function renderSession(session) {
 
   if (els.deviceBuzzBtn) {
     const playerBlockedReason = getBuzzBlockReason(session, { strict: true });
-    const localPending = Boolean(local.playerBuzzPending);
     const localAlreadyTriedThisRound =
-      Number(local.lastBuzzAttemptRoundId) === Number(session.roundId);
+      Number(local.playerAttemptRoundId) === Number(session.roundId);
 
     const enabled =
       !locallyFinished &&
       playerBlockedReason === null &&
-      !localPending &&
       !localAlreadyTriedThisRound;
 
     els.deviceBuzzBtn.disabled = !enabled;
-    els.deviceBuzzBtn.dataset.pending = localPending ? "1" : "0";
 
     const amIWinner =
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;

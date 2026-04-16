@@ -170,30 +170,30 @@ export function isSessionWaitingForFreshSync(session) {
   return sameRound && roundLooksOpen;
 }
 
-export function getBuzzBlockReason(session) {
+export function getBuzzBlockReason(session, options = {}) {
+  const { strict = false } = options;
+
   if (!local.joinedPlayer) return "join_required";
-
   if (session.locked) return "round_locked";
-
   if (isMyCooldownActive(session)) return "team_cooldown";
-
-  if (isSessionWaitingForFreshSync(session)) return "session_not_updated";
-
-  if (hasMyPressInCurrentRound(session)) return "already_pressed_this_round";
 
   if (session.winnerTeamId !== null && !session.answerExpired) {
     if (session.winnerPlayerId && session.winnerPlayerId !== local.deviceId) {
       return "another_player_won";
     }
-
     return "round_locked";
+  }
+
+  if (strict) {
+    if (isSessionWaitingForFreshSync(session)) return "session_not_updated";
+    if (hasMyPressInCurrentRound(session)) return "already_pressed_this_round";
   }
 
   return null;
 }
 
 export function canBuzz(session) {
-  return getBuzzBlockReason(session) === null;
+  return getBuzzBlockReason(session, { strict: false }) === null;
 }
 
 export function getCooldownSecondsLeft(session) {
@@ -448,12 +448,6 @@ export async function registerPress(teamId, playerName = "") {
 
 export async function claimBuzz(teamId, playerName = "") {
   if (!local.currentSessionCode) return false;
-
-  const session = await readCurrentSession();
-
-  if (getBuzzBlockReason(session)) {
-    return false;
-  }
 
   const safePlayerName = sanitizeName(playerName) || "لاعب";
   const teamIdNum = Number(teamId);

@@ -39,7 +39,7 @@ function getBuzzRejectMessage(reason) {
 
 async function getAccurateBuzzBlockReason() {
   const session = await readCurrentSession();
-  return getBuzzBlockReason(session);
+  return getBuzzBlockReason(session, { strict: true });
 }
 
 export function savePlayerDraft() {
@@ -219,14 +219,6 @@ export function bindPlayerEvents() {
         }
 
         if (buzzBtn.dataset.pending === "1") {
-          return;
-        }
-
-        const initialReason = await getAccurateBuzzBlockReason();
-        if (initialReason) {
-          showToast(getBuzzRejectMessage(initialReason), true);
-          buzzBtn.dataset.pending = "0";
-          buzzBtn.disabled = false;
           return;
         }
 

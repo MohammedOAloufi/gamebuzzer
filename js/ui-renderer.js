@@ -293,8 +293,8 @@ export function renderWinner(session) {
 
   if (els.winnerTeamText) {
     els.winnerTeamText.textContent = session.answerExpired
-      ? `الفريق: ${winnerTeam.name} - انتهى وقته`
-      : `الفريق: ${winnerTeam.name}`;
+      ? `${winnerTeam.name} - انتهى وقته`
+      : winnerTeam.name;
   }
 }
 
@@ -341,10 +341,8 @@ export function renderHostBuzzButtons(session) {
       </div>
 
       ${
-        currentPress
-          ? `<div class="team-winner-indicator">${
-              isWinner ? "أول ضغطة معتمدة" : "تم تسجيل ضغطة"
-            }</div>`
+        currentPress && !isWinner
+          ? `<div class="team-winner-indicator">تم تسجيل ضغطة</div>`
           : ""
       }
 

@@ -154,30 +154,9 @@ export async function startTickWorker() {
         local.currentSessionCode,
       );
 
-      const serverNow = getServerNow();
-
-      if (
-        session.winnerTeamId !== null &&
-        !session.timerRunning &&
-        !session.answerExpired &&
-        !session.roundEndsAt &&
-        !session.roundStartedAt
-      ) {
-        const maxTime = Number(session.maxTime || 3);
-
-        await updateSessionPatch({
-          timerRunning: true,
-          roundStartedAt: serverNow,
-          roundEndsAt: serverNow + maxTime * 1000,
-          timeLeft: maxTime,
-          hostUpdatedAt: serverNow,
-        });
-
-        return;
-      }
-
       if (!session.timerRunning || !session.roundEndsAt) return;
 
+      const serverNow = getServerNow();
       const leftMs = Number(session.roundEndsAt) - serverNow;
 
       if (leftMs <= 0) {

@@ -1,5 +1,5 @@
-import { createDeviceId } from "./utils.js";
 import { db, ref, onValue } from "./firebase.js";
+import { createDeviceId } from "./utils.js";
 
 export const TEAM_COLORS = [
   "team-blue",

@@ -361,8 +361,10 @@ export async function resetToFreshRound(session, extraPatch = {}) {
 }
 
 export async function toggleLock() {
+  const session = await readCurrentSession();
+
   await updateSessionPatch({
-    locked: !(await readCurrentSession()).locked,
+    locked: !session.locked,
     hostUpdatedAt: getServerNow(),
   });
 }
@@ -485,10 +487,10 @@ export async function claimBuzz(teamId, playerName = "") {
         winnerPlayerId: local.deviceId,
         winnerPressedAt: serverNow,
         locked: true,
-        timerRunning: false,
+        timerRunning: true,
         answerExpired: false,
-        roundStartedAt: null,
-        roundEndsAt: null,
+        roundStartedAt: serverNow,
+        roundEndsAt: serverNow + maxTime * 1000,
         timeLeft: maxTime,
         cooldownPlayerId: "",
         cooldownTeamId: null,

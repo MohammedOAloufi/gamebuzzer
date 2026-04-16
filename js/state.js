@@ -44,10 +44,10 @@ export const local = {
   serverTimeOffsetMs: 0,
   serverClockReady: false,
 
-  // player buzz local state
-  playerBuzzInFlight: false,
-  playerBuzzLockUntil: 0,
-  lastPointerDownAt: 0,
+  // player buzz single-source state
+  playerBuzzPending: false,
+  playerBuzzThrottleUntil: 0,
+  playerPendingStartedAt: 0,
   lastPlayerRoundUiKey: "",
   lastSeenForceUnlockToken: 0,
 };

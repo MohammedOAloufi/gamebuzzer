@@ -18,8 +18,7 @@ import {
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
 
-const POINTER_THROTTLE_MS = 200;
-const REQUEST_GUARD_MS = 250;
+const BUZZ_POINTER_THROTTLE_MS = 200;
 
 function getBuzzRejectMessage(reason) {
   switch (reason) {
@@ -40,51 +39,84 @@ function getBuzzRejectMessage(reason) {
   }
 }
 
+function setBuzzPendingState() {
+  local.playerBuzzPending = true;
+  local.playerPendingStartedAt = Date.now();
+
+  if (els.deviceBuzzBtn) {
+    els.deviceBuzzBtn.dataset.pending = "1";
+  }
+}
+
+function clearBuzzPendingState() {
+  local.playerBuzzPending = false;
+  local.playerPendingStartedAt = 0;
+
+  if (els.deviceBuzzBtn) {
+    els.deviceBuzzBtn.dataset.pending = "0";
+  }
+}
+
 async function getAccurateBuzzBlockReason() {
   const session = await readCurrentSession();
   return getBuzzBlockReason(session, { strict: true });
 }
 
-function markBuzzButtonUiLocked() {
-  if (!els.deviceBuzzBtn) return;
-
-  els.deviceBuzzBtn.dataset.pending = "1";
-  els.deviceBuzzBtn.dataset.hardLocked = "1";
-  els.deviceBuzzBtn.dataset.lockedAt = String(Date.now());
-  els.deviceBuzzBtn.style.pointerEvents = "none";
-  els.deviceBuzzBtn.disabled = true;
-}
-
-function clearBuzzButtonUiLock() {
-  if (!els.deviceBuzzBtn) return;
-
-  els.deviceBuzzBtn.dataset.pending = "0";
-  els.deviceBuzzBtn.dataset.hardLocked = "0";
-  els.deviceBuzzBtn.dataset.lockedAt = "";
-  els.deviceBuzzBtn.style.pointerEvents = "";
-}
-
-function lockBuzzRequestWindow(ms = REQUEST_GUARD_MS) {
-  local.playerBuzzLockUntil = Date.now() + Math.max(0, Number(ms || 0));
-  markBuzzButtonUiLocked();
-}
-
-function unlockBuzz() {
-  local.playerBuzzInFlight = false;
-  local.playerBuzzLockUntil = 0;
-  clearBuzzButtonUiLock();
-
-  if (els.deviceBuzzBtn) {
-    els.deviceBuzzBtn.disabled = false;
-  }
+function setPointerThrottle(ms = BUZZ_POINTER_THROTTLE_MS) {
+  local.playerBuzzThrottleUntil = Date.now() + Math.max(0, Number(ms || 0));
 }
 
 function isPointerThrottled() {
-  return Date.now() - Number(local.lastPointerDownAt || 0) < POINTER_THROTTLE_MS;
+  return Date.now() < Number(local.playerBuzzThrottleUntil || 0);
 }
 
-function isBuzzRequestLocked() {
-  return Date.now() < Number(local.playerBuzzLockUntil || 0);
+async function handleBuzzInput() {
+  try {
+    const fixedTeamId = Number(local.playerTeamId);
+    const fixedPlayerName = local.playerName || getCurrentPlayerName();
+
+    if (!Number.isFinite(fixedTeamId)) {
+      showToast("اختر الفريق أولاً", true);
+      return;
+    }
+
+    if (!local.joinedPlayer) {
+      showToast("يجب الانضمام أولاً", true);
+      return;
+    }
+
+    if (local.playerBuzzPending) {
+      return;
+    }
+
+    if (isPointerThrottled()) {
+      return;
+    }
+
+    setPointerThrottle(BUZZ_POINTER_THROTTLE_MS);
+    setBuzzPendingState();
+
+    const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
+
+    if (!ok) {
+      const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
+
+      showToast(
+        getBuzzRejectMessage(finalReason || "another_player_won"),
+        true,
+      );
+
+      clearBuzzPendingState();
+      return;
+    }
+
+    // لا نفك pending هنا.
+    // الرندر نفسه سيفكها عند وصول تغير مؤكد في حالة الجلسة.
+  } catch (error) {
+    console.error(error);
+    showToast("تعذر إرسال الضغط", true);
+    clearBuzzPendingState();
+  }
 }
 
 export function savePlayerDraft() {
@@ -170,73 +202,6 @@ export function startPresenceHeartbeat() {
   }, PLAYER_HEARTBEAT_MS);
 }
 
-async function handleBuzzAttempt(event) {
-  if (event) {
-    event.preventDefault();
-  }
-
-  try {
-    const fixedTeamId = Number(local.playerTeamId);
-    const fixedPlayerName = local.playerName || getCurrentPlayerName();
-
-    if (!Number.isFinite(fixedTeamId)) {
-      showToast("اختر الفريق أولاً", true);
-      return;
-    }
-
-    if (!local.joinedPlayer) {
-      showToast("يجب الانضمام أولاً", true);
-      return;
-    }
-
-    if (isPointerThrottled()) {
-      return;
-    }
-
-    local.lastPointerDownAt = Date.now();
-
-    if (local.playerBuzzInFlight) {
-      return;
-    }
-
-    if (isBuzzRequestLocked()) {
-      return;
-    }
-
-    local.playerBuzzInFlight = true;
-    lockBuzzRequestWindow(REQUEST_GUARD_MS);
-
-    const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
-
-    if (!ok) {
-      const finalReason = await getAccurateBuzzBlockReason();
-
-      showToast(
-        getBuzzRejectMessage(finalReason || "another_player_won"),
-        true,
-      );
-
-      local.playerBuzzInFlight = false;
-
-      const remaining = Number(local.playerBuzzLockUntil || 0) - Date.now();
-
-      window.setTimeout(() => {
-        if (!local.playerBuzzInFlight) {
-          unlockBuzz();
-        }
-      }, Math.max(0, remaining));
-
-      return;
-    }
-
-    local.playerBuzzInFlight = false;
-  } catch (error) {
-    console.error(error);
-    showToast("تعذر إرسال الضغط", true);
-    unlockBuzz();
-  }
-}
-
 export function bindPlayerEvents() {
   if (els.selectedTeam) {
     els.selectedTeam.addEventListener("change", async () => {
@@ -313,8 +278,9 @@ export function bindPlayerEvents() {
   }
 
   if (els.deviceBuzzBtn) {
-    els.deviceBuzzBtn.addEventListener("pointerdown", handleBuzzAttempt, {
-      passive: false,
+    els.deviceBuzzBtn.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      handleBuzzInput();
     });
   }
 }

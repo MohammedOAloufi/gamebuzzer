@@ -2,7 +2,7 @@ import { els } from "./dom.js";
 import { local, pageType, getServerNow } from "./state.js";
 import { escapeHtml, getPlayerJoinUrl } from "./utils.js";
 import {
-  canBuzz,
+  getBuzzBlockReason,
   getCooldownSecondsLeft,
   getPlayersByTeam,
   getSelectedTeam,
@@ -195,14 +195,13 @@ function syncHostSounds(session, displayTimeRaw = null) {
   syncHostSounds._prevSession = cloneSoundSession(session);
 }
 
-function clearPlayerLocalBuzzState() {
-  local.playerBuzzInFlight = false;
-  local.playerBuzzPointerThrottleUntil = 0;
+function clearPlayerPendingState() {
+  local.playerBuzzPending = false;
+  local.playerPendingStartedAt = 0;
 
   if (!els.deviceBuzzBtn) return;
 
   els.deviceBuzzBtn.dataset.pending = "0";
-  els.deviceBuzzBtn.style.pointerEvents = "";
 }
 
 function resetPlayerBuzzUiState(session) {
@@ -225,21 +224,30 @@ function resetPlayerBuzzUiState(session) {
     !session.timerRunning &&
     !session.answerExpired;
 
-  if (
+  const forceUnlockChanged =
     Number(session.forceUnlockToken || 0) !==
-    Number(local.lastSeenForceUnlockToken || 0)
-  ) {
+    Number(local.lastSeenForceUnlockToken || 0);
+
+  if (forceUnlockChanged) {
     local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
-    clearPlayerLocalBuzzState();
+    clearPlayerPendingState();
   }
 
   if (local.lastPlayerRoundUiKey !== roundUiKey) {
     local.lastPlayerRoundUiKey = roundUiKey;
-    clearPlayerLocalBuzzState();
+    clearPlayerPendingState();
   }
 
   if (roundIsFresh) {
-    clearPlayerLocalBuzzState();
+    clearPlayerPendingState();
+  }
+
+  if (
+    local.playerBuzzPending &&
+    Number(local.playerPendingStartedAt || 0) > 0 &&
+    Date.now() - Number(local.playerPendingStartedAt || 0) > 2500
+  ) {
+    clearPlayerPendingState();
   }
 }
 
@@ -738,15 +746,15 @@ export function renderSession(session) {
   resetPlayerBuzzUiState(session);
 
   if (els.deviceBuzzBtn) {
-    const localLockActive = local.playerBuzzInFlight;
-    const enabled = !locallyFinished && canBuzz(session) && !localLockActive;
+    const playerBlockedReason = getBuzzBlockReason(session, { strict: true });
+    const localPending = Boolean(local.playerBuzzPending);
+    const enabled =
+      !locallyFinished &&
+      playerBlockedReason === null &&
+      !localPending;
 
     els.deviceBuzzBtn.disabled = !enabled;
-
-    if (!localLockActive) {
-      els.deviceBuzzBtn.dataset.pending = "0";
-      els.deviceBuzzBtn.style.pointerEvents = "";
-    }
+    els.deviceBuzzBtn.dataset.pending = localPending ? "1" : "0";
 
     const amIWinner =
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;

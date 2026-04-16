@@ -52,6 +52,7 @@ export function normalizeSession(raw, code) {
   const parsedCooldown = Number(raw?.cooldown);
   const parsedExpiresAt = Number(raw?.expiresAt);
   const parsedRoundId = Number(raw?.roundId);
+  const parsedForceUnlockToken = Number(raw?.forceUnlockToken);
 
   const safePresses =
     raw?.presses && typeof raw.presses === "object" ? raw.presses : {};
@@ -64,6 +65,9 @@ export function normalizeSession(raw, code) {
     timeLeft: Number.isFinite(parsedTimeLeft) ? parsedTimeLeft : 3,
     maxTime: Number.isFinite(parsedMaxTime) ? parsedMaxTime : 3,
     roundId: Number.isFinite(parsedRoundId) ? parsedRoundId : 1,
+    forceUnlockToken: Number.isFinite(parsedForceUnlockToken)
+      ? parsedForceUnlockToken
+      : 0,
     winnerTeamId:
       raw?.winnerTeamId === null || raw?.winnerTeamId === undefined
         ? null
@@ -270,6 +274,7 @@ export async function ensureSession(code) {
       timeLeft: 3,
       maxTime: 3,
       roundId: 1,
+      forceUnlockToken: 0,
       winnerTeamId: null,
       winnerPlayerName: "",
       winnerPlayerId: "",
@@ -314,6 +319,10 @@ export async function ensureSession(code) {
 
   if (!Number.isFinite(Number(current.roundId))) {
     patch.roundId = 1;
+  }
+
+  if (!Number.isFinite(Number(current.forceUnlockToken))) {
+    patch.forceUnlockToken = 0;
   }
 
   if (
@@ -418,6 +427,7 @@ export async function openAllForPlayers() {
     cooldownEndsAt: null,
     cooldownPlayerId: "",
     cooldownTeamId: null,
+    forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
   });
 }
 

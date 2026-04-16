@@ -44,10 +44,11 @@ export const local = {
   serverTimeOffsetMs: 0,
   serverClockReady: false,
 
-  // player buzz guard state
+  // player buzz local guard
   playerBuzzInFlight: false,
   playerBuzzLockUntil: 0,
   lastPlayerRoundUiKey: "",
+  lastSeenForceUnlockToken: 0,
 };
 
 export function getServerNow() {

@@ -195,6 +195,17 @@ function syncHostSounds(session, displayTimeRaw = null) {
   syncHostSounds._prevSession = cloneSoundSession(session);
 }
 
+function clearPlayerLocalBuzzLock() {
+  local.playerBuzzInFlight = false;
+  local.playerBuzzLockUntil = 0;
+
+  if (!els.deviceBuzzBtn) return;
+
+  els.deviceBuzzBtn.dataset.pending = "0";
+  els.deviceBuzzBtn.dataset.hardLocked = "0";
+  els.deviceBuzzBtn.dataset.lockedAt = "";
+}
+
 function resetPlayerBuzzUiState(session) {
   if (!els.deviceBuzzBtn) return;
 
@@ -221,27 +232,28 @@ function resetPlayerBuzzUiState(session) {
     Number(local.playerBuzzLockUntil || 0) > 0 &&
     Date.now() >= Number(local.playerBuzzLockUntil || 0);
 
-  if (local.lastPlayerRoundUiKey !== roundUiKey) {
-    local.playerBuzzInFlight = false;
-    local.playerBuzzLockUntil = 0;
-    local.lastPlayerRoundUiKey = roundUiKey;
+  if (
+    Number(session.forceUnlockToken || 0) !==
+    Number(local.lastSeenForceUnlockToken || 0)
+  ) {
+    local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
+    clearPlayerLocalBuzzLock();
+  }
 
-    btn.dataset.pending = "0";
-    btn.dataset.hardLocked = "0";
-    btn.dataset.lockedAt = "";
+  if (local.lastPlayerRoundUiKey !== roundUiKey) {
+    local.lastPlayerRoundUiKey = roundUiKey;
+    clearPlayerLocalBuzzLock();
   }
 
   if (roundIsFresh) {
-    local.playerBuzzInFlight = false;
-    local.playerBuzzLockUntil = 0;
-
-    btn.dataset.pending = "0";
-    btn.dataset.hardLocked = "0";
-    btn.dataset.lockedAt = "";
+    clearPlayerLocalBuzzLock();
   }
 
   if (localLockExpired && !local.playerBuzzInFlight) {
-    local.playerBuzzLockUntil = 0;
+    clearPlayerLocalBuzzLock();
+  }
+
+  if (!local.playerBuzzInFlight && Date.now() >= Number(local.playerBuzzLockUntil || 0)) {
     btn.dataset.pending = "0";
     btn.dataset.hardLocked = "0";
     btn.dataset.lockedAt = "";
@@ -747,10 +759,7 @@ export function renderSession(session) {
       local.playerBuzzInFlight ||
       Date.now() < Number(local.playerBuzzLockUntil || 0);
 
-    const enabled =
-      !locallyFinished &&
-      canBuzz(session) &&
-      !localLockActive;
+    const enabled = !locallyFinished && canBuzz(session) && !localLockActive;
 
     els.deviceBuzzBtn.disabled = !enabled;
 

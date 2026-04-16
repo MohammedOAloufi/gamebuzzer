@@ -149,19 +149,51 @@ export function isMyCooldownActive(session) {
 
 export function hasMyPressInCurrentRound(session) {
   const myPress = session.presses?.[local.deviceId];
-  return Boolean(
-    myPress && Number(myPress.roundId) === Number(session.roundId),
-  );
+  if (!myPress) return false;
+
+  return Number(myPress.roundId) === Number(session.roundId);
+}
+
+export function isSessionWaitingForFreshSync(session) {
+  const myPress = session.presses?.[local.deviceId];
+  if (!myPress) return false;
+
+  const sameRound = Number(myPress.roundId) === Number(session.roundId);
+  const roundLooksOpen =
+    session.winnerTeamId === null &&
+    !session.locked &&
+    !session.timerRunning &&
+    !session.answerExpired &&
+    !session.roundStartedAt &&
+    !session.roundEndsAt;
+
+  return sameRound && roundLooksOpen;
+}
+
+export function getBuzzBlockReason(session) {
+  if (!local.joinedPlayer) return "join_required";
+
+  if (session.locked) return "round_locked";
+
+  if (isMyCooldownActive(session)) return "team_cooldown";
+
+  if (isSessionWaitingForFreshSync(session)) return "session_not_updated";
+
+  if (hasMyPressInCurrentRound(session)) return "already_pressed_this_round";
+
+  if (session.winnerTeamId !== null && !session.answerExpired) {
+    if (session.winnerPlayerId && session.winnerPlayerId !== local.deviceId) {
+      return "another_player_won";
+    }
+
+    return "round_locked";
+  }
+
+  return null;
 }
 
 export function canBuzz(session) {
-  return (
-    local.joinedPlayer &&
-    !session.locked &&
-    (session.winnerTeamId === null || session.answerExpired) &&
-    !isMyCooldownActive(session) &&
-    !hasMyPressInCurrentRound(session)
-  );
+  return getBuzzBlockReason(session) === null;
 }
 
 export function getCooldownSecondsLeft(session) {
@@ -419,12 +451,7 @@ export async function claimBuzz(teamId, playerName = "") {
 
   const session = await readCurrentSession();
 
-  if (
-    session.locked ||
-    (session.winnerTeamId !== null && !session.answerExpired) ||
-    isMyCooldownActive(session) ||
-    hasMyPressInCurrentRound(session)
-  ) {
+  if (getBuzzBlockReason(session)) {
     return false;
   }
 
@@ -459,19 +486,26 @@ export async function claimBuzz(teamId, playerName = "") {
         Boolean(cooldownEndsAt) &&
         serverNow < Number(cooldownEndsAt);
 
+      const currentPresses =
+        current.presses && typeof current.presses === "object"
+          ? current.presses
+          : {};
+      const myCurrentPress = currentPresses[local.deviceId];
+      const alreadyPressedThisRound =
+        myCurrentPress &&
+        Number(myCurrentPress.roundId || 0) === Number(roundId);
+
       if (
         locked ||
         (currentWinner !== null && !answerExpired) ||
-        myTeamCooldownActive
+        myTeamCooldownActive ||
+        alreadyPressedThisRound
       ) {
         return;
       }
 
       const maxTime = Number(current.maxTime || 3);
-      const nextPresses =
-        current.presses && typeof current.presses === "object"
-          ? { ...current.presses }
-          : {};
+      const nextPresses = { ...currentPresses };
 
       nextPresses[local.deviceId] = {
         teamId: teamIdNum,

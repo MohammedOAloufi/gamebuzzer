@@ -1,8 +1,9 @@
 import { els } from "./dom.js";
-import { pageType, local, PLAYER_HEARTBEAT_MS } from "./state.js";
+import { pageType, local, PLAYER_HEARTBEAT_MS, getServerNow } from "./state.js";
 import { onDisconnect, set, update } from "./firebase.js";
 import {
   claimBuzz,
+  getBuzzBlockReason,
   getCurrentPlayerName,
   getSelectedTeamId,
   readCurrentSession,
@@ -16,6 +17,30 @@ import {
   showToast,
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
+
+function getBuzzRejectMessage(reason) {
+  switch (reason) {
+    case "another_player_won":
+      return "سبقك لاعب";
+    case "round_locked":
+      return "الجولة مقفلة";
+    case "team_cooldown":
+      return "فريقك عليه منع";
+    case "already_pressed_this_round":
+      return "أنت مسجل ضغطة في هذه الجولة";
+    case "session_not_updated":
+      return "الجلسة لم تتحدث بعد";
+    case "join_required":
+      return "يجب الانضمام أولاً";
+    default:
+      return "تعذر إرسال الضغط";
+  }
+}
+
+async function getAccurateBuzzBlockReason() {
+  const session = await readCurrentSession();
+  return getBuzzBlockReason(session);
+}
 
 export function savePlayerDraft() {
   try {
@@ -53,16 +78,17 @@ export async function attachPresence(code) {
   const pRef = presenceRef(code);
   const playerName = getCurrentPlayerName();
   const teamId = getSelectedTeamId();
+  const serverNow = getServerNow();
 
   await set(pRef, {
     name: playerName,
     teamId: Number.isFinite(teamId) ? teamId : null,
-    at: Date.now(),
+    at: serverNow,
     userAgent: navigator.userAgent,
   });
 
   await update(sessionRef(code), {
-    updatedAt: Date.now(),
+    updatedAt: serverNow,
   });
 
   await refreshSessionExpiry();
@@ -88,7 +114,7 @@ export function startPresenceHeartbeat() {
       await update(presenceRef(local.currentSessionCode), {
         name: getCurrentPlayerName(),
         teamId: getSelectedTeamId(),
-        at: Date.now(),
+        at: getServerNow(),
         userAgent: navigator.userAgent,
       });
 
@@ -196,13 +222,19 @@ export function bindPlayerEvents() {
           return;
         }
 
+        const initialReason = await getAccurateBuzzBlockReason();
+        if (initialReason) {
+          showToast(getBuzzRejectMessage(initialReason), true);
+          buzzBtn.dataset.pending = "0";
+          buzzBtn.disabled = false;
+          return;
+        }
+
         buzzBtn.dataset.pending = "1";
         buzzBtn.disabled = true;
 
-        // الأهم: لا ننتظر presence قبل الحسم
         const claimPromise = claimBuzz(fixedTeamId, fixedPlayerName);
 
-        // presence بالخلفية فقط
         attachPresence(local.currentSessionCode).catch((error) => {
           console.error("Presence refresh error:", error);
         });
@@ -210,7 +242,11 @@ export function bindPlayerEvents() {
         const ok = await claimPromise;
 
         if (!ok) {
-          showToast("تم إغلاق الجولة أو سبقك لاعب آخر", true);
+          const finalReason = await getAccurateBuzzBlockReason();
+          showToast(
+            getBuzzRejectMessage(finalReason || "another_player_won"),
+            true,
+          );
           buzzBtn.disabled = false;
         }
       } catch (error) {

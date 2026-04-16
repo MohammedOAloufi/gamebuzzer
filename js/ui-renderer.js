@@ -195,6 +195,33 @@ function syncHostSounds(session, displayTimeRaw = null) {
   syncHostSounds._prevSession = cloneSoundSession(session);
 }
 
+function resetPlayerBuzzUiState(session) {
+  if (!els.deviceBuzzBtn) return;
+
+  const roundUiKey = [
+    String(session.code || ""),
+    Number(session.roundId || 0),
+    Number(session.winnerTeamId ?? -1),
+    Boolean(session.timerRunning),
+    Boolean(session.answerExpired),
+  ].join(":");
+
+  if (resetPlayerBuzzUiState._lastRoundUiKey !== roundUiKey) {
+    els.deviceBuzzBtn.dataset.pending = "0";
+    resetPlayerBuzzUiState._lastRoundUiKey = roundUiKey;
+  }
+
+  const roundIsFresh =
+    session.winnerTeamId === null &&
+    !session.locked &&
+    !session.timerRunning &&
+    !session.answerExpired;
+
+  if (roundIsFresh) {
+    els.deviceBuzzBtn.dataset.pending = "0";
+  }
+}
+
 export function showToast(message, isError = false) {
   if (!els.toast) return;
 
@@ -687,9 +714,15 @@ export function renderSession(session) {
     els.cooldownSelector.value = String(session.cooldown ?? 0);
   }
 
+  resetPlayerBuzzUiState(session);
+
   if (els.deviceBuzzBtn) {
     const enabled = !locallyFinished && canBuzz(session);
     els.deviceBuzzBtn.disabled = !enabled;
+
+    if (enabled) {
+      els.deviceBuzzBtn.dataset.pending = "0";
+    }
 
     const amIWinner =
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;

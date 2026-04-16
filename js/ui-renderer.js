@@ -208,6 +208,8 @@ function resetPlayerBuzzUiState(session) {
 
   if (resetPlayerBuzzUiState._lastRoundUiKey !== roundUiKey) {
     els.deviceBuzzBtn.dataset.pending = "0";
+    els.deviceBuzzBtn.dataset.hardLocked = "0";
+    els.deviceBuzzBtn.dataset.lockedAt = "";
     resetPlayerBuzzUiState._lastRoundUiKey = roundUiKey;
   }
 
@@ -219,6 +221,8 @@ function resetPlayerBuzzUiState(session) {
 
   if (roundIsFresh) {
     els.deviceBuzzBtn.dataset.pending = "0";
+    els.deviceBuzzBtn.dataset.hardLocked = "0";
+    els.deviceBuzzBtn.dataset.lockedAt = "";
   }
 }
 
@@ -722,6 +726,8 @@ export function renderSession(session) {
 
     if (enabled) {
       els.deviceBuzzBtn.dataset.pending = "0";
+      els.deviceBuzzBtn.dataset.hardLocked = "0";
+      els.deviceBuzzBtn.dataset.lockedAt = "";
     }
 
     const amIWinner =

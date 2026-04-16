@@ -18,6 +18,8 @@ import {
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
 
+const BUZZ_TAP_GUARD_MS = 900;
+
 function getBuzzRejectMessage(reason) {
   switch (reason) {
     case "another_player_won":
@@ -40,6 +42,34 @@ function getBuzzRejectMessage(reason) {
 async function getAccurateBuzzBlockReason() {
   const session = await readCurrentSession();
   return getBuzzBlockReason(session, { strict: true });
+}
+
+function setBuzzHardLock(button) {
+  if (!button) return;
+
+  const now = Date.now();
+  button.dataset.pending = "1";
+  button.dataset.hardLocked = "1";
+  button.dataset.lockedAt = String(now);
+  button.disabled = true;
+}
+
+function releaseBuzzHardLock(button) {
+  if (!button) return;
+
+  button.dataset.pending = "0";
+  button.dataset.hardLocked = "0";
+  button.dataset.lockedAt = "";
+}
+
+function isBuzzHardLocked(button) {
+  if (!button) return false;
+  if (button.dataset.hardLocked !== "1") return false;
+
+  const lockedAt = Number(button.dataset.lockedAt || 0);
+  if (!lockedAt) return false;
+
+  return Date.now() - lockedAt < BUZZ_TAP_GUARD_MS;
 }
 
 export function savePlayerDraft() {
@@ -218,12 +248,11 @@ export function bindPlayerEvents() {
           return;
         }
 
-        if (buzzBtn.dataset.pending === "1") {
+        if (isBuzzHardLocked(buzzBtn)) {
           return;
         }
 
-        buzzBtn.dataset.pending = "1";
-        buzzBtn.disabled = true;
+        setBuzzHardLock(buzzBtn);
 
         const claimPromise = claimBuzz(fixedTeamId, fixedPlayerName);
 
@@ -235,21 +264,31 @@ export function bindPlayerEvents() {
 
         if (!ok) {
           const finalReason = await getAccurateBuzzBlockReason();
+
           showToast(
             getBuzzRejectMessage(finalReason || "another_player_won"),
             true,
           );
-          buzzBtn.disabled = false;
+
+          if (finalReason === null) {
+            setTimeout(() => {
+              releaseBuzzHardLock(buzzBtn);
+              buzzBtn.disabled = false;
+            }, BUZZ_TAP_GUARD_MS);
+          } else {
+            releaseBuzzHardLock(buzzBtn);
+            buzzBtn.disabled = false;
+          }
+
+          return;
         }
       } catch (error) {
         console.error(error);
         showToast("تعذر إرسال الضغط", true);
-        if (els.deviceBuzzBtn) {
-          els.deviceBuzzBtn.disabled = false;
-        }
-      } finally {
+
         if (buzzBtn) {
-          buzzBtn.dataset.pending = "0";
+          releaseBuzzHardLock(buzzBtn);
+          buzzBtn.disabled = false;
         }
       }
     });

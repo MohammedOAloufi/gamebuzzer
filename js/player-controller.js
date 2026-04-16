@@ -18,7 +18,7 @@ import {
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
 
-const BUZZ_POINTER_THROTTLE_MS = 200;
+const BUZZ_POINTER_THROTTLE_MS = 180;
 
 function getBuzzRejectMessage(reason) {
   switch (reason) {
@@ -70,6 +70,21 @@ function isPointerThrottled() {
   return Date.now() < Number(local.playerBuzzThrottleUntil || 0);
 }
 
+function getCurrentRoundIdFromLocalSession() {
+  const raw = local.lastSession;
+  const parsed = Number(raw?.roundId);
+  return Number.isFinite(parsed) ? parsed : 1;
+}
+
+function hasAttemptedThisRound() {
+  const currentRoundId = getCurrentRoundIdFromLocalSession();
+  return Number(local.lastBuzzAttemptRoundId) === Number(currentRoundId);
+}
+
+function markAttemptForCurrentRound() {
+  local.lastBuzzAttemptRoundId = getCurrentRoundIdFromLocalSession();
+}
+
 async function handleBuzzInput() {
   try {
     const fixedTeamId = Number(local.playerTeamId);
@@ -93,7 +108,13 @@ async function handleBuzzInput() {
       return;
     }
 
+    if (hasAttemptedThisRound()) {
+      showToast("أنت مسجل ضغطة في هذه الجولة", true);
+      return;
+    }
+
     setPointerThrottle(BUZZ_POINTER_THROTTLE_MS);
+    markAttemptForCurrentRound();
     setBuzzPendingState();
 
     const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
@@ -111,7 +132,7 @@ async function handleBuzzInput() {
     }
 
     // لا نفك pending هنا.
-    // الرندر نفسه سيفكها عند وصول تغير مؤكد في حالة الجلسة.
+    // الرندر سيفكها عند تغير حالة مؤكدة في الجولة.
   } catch (error) {
     console.error(error);
     showToast("تعذر إرسال الضغط", true);

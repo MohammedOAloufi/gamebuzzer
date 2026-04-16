@@ -207,9 +207,10 @@ function clearPlayerPendingState() {
 function resetPlayerBuzzUiState(session) {
   if (!els.deviceBuzzBtn) return;
 
+  const newRoundId = Number(session.roundId || 1);
   const roundUiKey = [
     String(session.code || ""),
-    Number(session.roundId || 0),
+    newRoundId,
     Number(session.winnerTeamId ?? -1),
     String(session.winnerPlayerId || ""),
     Boolean(session.locked),
@@ -230,12 +231,17 @@ function resetPlayerBuzzUiState(session) {
 
   if (forceUnlockChanged) {
     local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
+    local.lastBuzzAttemptRoundId = null;
     clearPlayerPendingState();
   }
 
   if (local.lastPlayerRoundUiKey !== roundUiKey) {
     local.lastPlayerRoundUiKey = roundUiKey;
     clearPlayerPendingState();
+  }
+
+  if (Number(local.lastBuzzAttemptRoundId) !== newRoundId) {
+    local.lastBuzzAttemptRoundId = null;
   }
 
   if (roundIsFresh) {
@@ -574,7 +580,7 @@ export function renderTeamSelect(session) {
       if (!raw) return null;
       const data = JSON.parse(raw);
       return Number(data?.teamId);
-    } catch (error) {
+    } catch {
       return null;
     }
   })();
@@ -591,10 +597,7 @@ export function renderTeamSelect(session) {
 
   const isSelectFocused = document.activeElement === els.selectedTeam;
 
-  if (
-    els.selectedTeam.dataset.renderKey === nextRenderKey &&
-    isSelectFocused
-  ) {
+  if (els.selectedTeam.dataset.renderKey === nextRenderKey && isSelectFocused) {
     renderPlayerTeam(session);
     return;
   }
@@ -748,10 +751,14 @@ export function renderSession(session) {
   if (els.deviceBuzzBtn) {
     const playerBlockedReason = getBuzzBlockReason(session, { strict: true });
     const localPending = Boolean(local.playerBuzzPending);
+    const localAlreadyTriedThisRound =
+      Number(local.lastBuzzAttemptRoundId) === Number(session.roundId);
+
     const enabled =
       !locallyFinished &&
       playerBlockedReason === null &&
-      !localPending;
+      !localPending &&
+      !localAlreadyTriedThisRound;
 
     els.deviceBuzzBtn.disabled = !enabled;
     els.deviceBuzzBtn.dataset.pending = localPending ? "1" : "0";

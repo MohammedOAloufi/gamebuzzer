@@ -43,6 +43,11 @@ export const local = {
   hostHeartbeat: null,
   serverTimeOffsetMs: 0,
   serverClockReady: false,
+
+  // player buzz guard state
+  playerBuzzInFlight: false,
+  playerBuzzLockUntil: 0,
+  lastPlayerRoundUiKey: "",
 };
 
 export function getServerNow() {

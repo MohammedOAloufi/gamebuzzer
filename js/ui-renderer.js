@@ -204,17 +204,12 @@ function resetPlayerBuzzUiState(session) {
     String(session.code || ""),
     Number(session.roundId || 0),
     Number(session.winnerTeamId ?? -1),
+    String(session.winnerPlayerId || ""),
+    Boolean(session.locked),
     Boolean(session.timerRunning),
     Boolean(session.answerExpired),
+    Number(session.cooldownTeamId ?? -1),
   ].join(":");
-
-  if (resetPlayerBuzzUiState._lastRoundUiKey !== roundUiKey) {
-    btn.dataset.pending = "0";
-    btn.dataset.hardLocked = "0";
-    btn.dataset.lockedAt = "";
-    btn.disabled = false;
-    resetPlayerBuzzUiState._lastRoundUiKey = roundUiKey;
-  }
 
   const roundIsFresh =
     session.winnerTeamId === null &&
@@ -222,20 +217,34 @@ function resetPlayerBuzzUiState(session) {
     !session.timerRunning &&
     !session.answerExpired;
 
-  if (roundIsFresh) {
+  const localLockExpired =
+    Number(local.playerBuzzLockUntil || 0) > 0 &&
+    Date.now() >= Number(local.playerBuzzLockUntil || 0);
+
+  if (local.lastPlayerRoundUiKey !== roundUiKey) {
+    local.playerBuzzInFlight = false;
+    local.playerBuzzLockUntil = 0;
+    local.lastPlayerRoundUiKey = roundUiKey;
+
     btn.dataset.pending = "0";
     btn.dataset.hardLocked = "0";
     btn.dataset.lockedAt = "";
-    btn.disabled = false;
   }
 
-  const lockedAt = Number(btn.dataset.lockedAt || 0);
+  if (roundIsFresh) {
+    local.playerBuzzInFlight = false;
+    local.playerBuzzLockUntil = 0;
 
-  if (lockedAt && Date.now() - lockedAt > 1500) {
     btn.dataset.pending = "0";
     btn.dataset.hardLocked = "0";
     btn.dataset.lockedAt = "";
-    btn.disabled = false;
+  }
+
+  if (localLockExpired && !local.playerBuzzInFlight) {
+    local.playerBuzzLockUntil = 0;
+    btn.dataset.pending = "0";
+    btn.dataset.hardLocked = "0";
+    btn.dataset.lockedAt = "";
   }
 }
 
@@ -734,10 +743,18 @@ export function renderSession(session) {
   resetPlayerBuzzUiState(session);
 
   if (els.deviceBuzzBtn) {
-    const enabled = !locallyFinished && canBuzz(session);
+    const localLockActive =
+      local.playerBuzzInFlight ||
+      Date.now() < Number(local.playerBuzzLockUntil || 0);
+
+    const enabled =
+      !locallyFinished &&
+      canBuzz(session) &&
+      !localLockActive;
+
     els.deviceBuzzBtn.disabled = !enabled;
 
-    if (enabled) {
+    if (!localLockActive) {
       els.deviceBuzzBtn.dataset.pending = "0";
       els.deviceBuzzBtn.dataset.hardLocked = "0";
       els.deviceBuzzBtn.dataset.lockedAt = "";

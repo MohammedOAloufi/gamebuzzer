@@ -18,7 +18,7 @@ import {
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
 
-const BUZZ_TAP_GUARD_MS = 900;
+const BUZZ_TAP_GUARD_MS = 500;
 
 function getBuzzRejectMessage(reason) {
   switch (reason) {
@@ -44,32 +44,40 @@ async function getAccurateBuzzBlockReason() {
   return getBuzzBlockReason(session, { strict: true });
 }
 
-function setBuzzHardLock(button) {
-  if (!button) return;
+function markBuzzButtonUiLocked() {
+  if (!els.deviceBuzzBtn) return;
 
-  const now = Date.now();
-  button.dataset.pending = "1";
-  button.dataset.hardLocked = "1";
-  button.dataset.lockedAt = String(now);
-  button.disabled = true;
+  els.deviceBuzzBtn.dataset.pending = "1";
+  els.deviceBuzzBtn.dataset.hardLocked = "1";
+  els.deviceBuzzBtn.dataset.lockedAt = String(Date.now());
+  els.deviceBuzzBtn.disabled = true;
 }
 
-function releaseBuzzHardLock(button) {
-  if (!button) return;
+function clearBuzzButtonUiLock() {
+  if (!els.deviceBuzzBtn) return;
 
-  button.dataset.pending = "0";
-  button.dataset.hardLocked = "0";
-  button.dataset.lockedAt = "";
+  els.deviceBuzzBtn.dataset.pending = "0";
+  els.deviceBuzzBtn.dataset.hardLocked = "0";
+  els.deviceBuzzBtn.dataset.lockedAt = "";
 }
 
-function isBuzzHardLocked(button) {
-  if (!button) return false;
-  if (button.dataset.hardLocked !== "1") return false;
+function lockBuzzTemporarily(ms = BUZZ_TAP_GUARD_MS) {
+  local.playerBuzzLockUntil = Date.now() + Math.max(0, Number(ms || 0));
+  markBuzzButtonUiLocked();
+}
 
-  const lockedAt = Number(button.dataset.lockedAt || 0);
-  if (!lockedAt) return false;
+function unlockBuzz() {
+  local.playerBuzzInFlight = false;
+  local.playerBuzzLockUntil = 0;
+  clearBuzzButtonUiLock();
 
-  return Date.now() - lockedAt < BUZZ_TAP_GUARD_MS;
+  if (els.deviceBuzzBtn) {
+    els.deviceBuzzBtn.disabled = false;
+  }
+}
+
+function isBuzzTemporarilyLocked() {
+  return Date.now() < Number(local.playerBuzzLockUntil || 0);
 }
 
 export function savePlayerDraft() {
@@ -232,8 +240,6 @@ export function bindPlayerEvents() {
 
   if (els.deviceBuzzBtn) {
     els.deviceBuzzBtn.addEventListener("click", async () => {
-      const buzzBtn = els.deviceBuzzBtn;
-
       try {
         const fixedTeamId = Number(local.playerTeamId);
         const fixedPlayerName = local.playerName || getCurrentPlayerName();
@@ -248,18 +254,16 @@ export function bindPlayerEvents() {
           return;
         }
 
-        if (isBuzzHardLocked(buzzBtn)) {
-          const lockedAt = Number(buzzBtn.dataset.lockedAt || 0);
-
-          if (Date.now() - lockedAt > BUZZ_TAP_GUARD_MS) {
-            releaseBuzzHardLock(buzzBtn);
-            buzzBtn.disabled = false;
-          } else {
-            return;
-          }
+        if (local.playerBuzzInFlight) {
+          return;
         }
 
-        setBuzzHardLock(buzzBtn);
+        if (isBuzzTemporarilyLocked()) {
+          return;
+        }
+
+        local.playerBuzzInFlight = true;
+        lockBuzzTemporarily(BUZZ_TAP_GUARD_MS);
 
         const claimPromise = claimBuzz(fixedTeamId, fixedPlayerName);
 
@@ -277,26 +281,27 @@ export function bindPlayerEvents() {
             true,
           );
 
+          local.playerBuzzInFlight = false;
+
           if (finalReason === null) {
-            setTimeout(() => {
-              releaseBuzzHardLock(buzzBtn);
-              buzzBtn.disabled = false;
-            }, BUZZ_TAP_GUARD_MS);
+            const remaining =
+              Number(local.playerBuzzLockUntil || 0) - Date.now();
+
+            window.setTimeout(() => {
+              unlockBuzz();
+            }, Math.max(0, remaining));
           } else {
-            releaseBuzzHardLock(buzzBtn);
-            buzzBtn.disabled = false;
+            unlockBuzz();
           }
 
           return;
         }
+
+        local.playerBuzzInFlight = false;
       } catch (error) {
         console.error(error);
         showToast("تعذر إرسال الضغط", true);
-
-        if (buzzBtn) {
-          releaseBuzzHardLock(buzzBtn);
-          buzzBtn.disabled = false;
-        }
+        unlockBuzz();
       }
     });
   }

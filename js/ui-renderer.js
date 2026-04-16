@@ -198,6 +198,8 @@ function syncHostSounds(session, displayTimeRaw = null) {
 function resetPlayerBuzzUiState(session) {
   if (!els.deviceBuzzBtn) return;
 
+  const btn = els.deviceBuzzBtn;
+
   const roundUiKey = [
     String(session.code || ""),
     Number(session.roundId || 0),
@@ -207,9 +209,10 @@ function resetPlayerBuzzUiState(session) {
   ].join(":");
 
   if (resetPlayerBuzzUiState._lastRoundUiKey !== roundUiKey) {
-    els.deviceBuzzBtn.dataset.pending = "0";
-    els.deviceBuzzBtn.dataset.hardLocked = "0";
-    els.deviceBuzzBtn.dataset.lockedAt = "";
+    btn.dataset.pending = "0";
+    btn.dataset.hardLocked = "0";
+    btn.dataset.lockedAt = "";
+    btn.disabled = false;
     resetPlayerBuzzUiState._lastRoundUiKey = roundUiKey;
   }
 
@@ -220,9 +223,19 @@ function resetPlayerBuzzUiState(session) {
     !session.answerExpired;
 
   if (roundIsFresh) {
-    els.deviceBuzzBtn.dataset.pending = "0";
-    els.deviceBuzzBtn.dataset.hardLocked = "0";
-    els.deviceBuzzBtn.dataset.lockedAt = "";
+    btn.dataset.pending = "0";
+    btn.dataset.hardLocked = "0";
+    btn.dataset.lockedAt = "";
+    btn.disabled = false;
+  }
+
+  const lockedAt = Number(btn.dataset.lockedAt || 0);
+
+  if (lockedAt && Date.now() - lockedAt > 1500) {
+    btn.dataset.pending = "0";
+    btn.dataset.hardLocked = "0";
+    btn.dataset.lockedAt = "";
+    btn.disabled = false;
   }
 }
 

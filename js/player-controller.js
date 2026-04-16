@@ -249,7 +249,14 @@ export function bindPlayerEvents() {
         }
 
         if (isBuzzHardLocked(buzzBtn)) {
-          return;
+          const lockedAt = Number(buzzBtn.dataset.lockedAt || 0);
+
+          if (Date.now() - lockedAt > BUZZ_TAP_GUARD_MS) {
+            releaseBuzzHardLock(buzzBtn);
+            buzzBtn.disabled = false;
+          } else {
+            return;
+          }
         }
 
         setBuzzHardLock(buzzBtn);

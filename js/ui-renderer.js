@@ -195,21 +195,18 @@ function syncHostSounds(session, displayTimeRaw = null) {
   syncHostSounds._prevSession = cloneSoundSession(session);
 }
 
-function clearPlayerLocalBuzzLock() {
+function clearPlayerLocalBuzzState() {
   local.playerBuzzInFlight = false;
-  local.playerBuzzLockUntil = 0;
+  local.playerBuzzPointerThrottleUntil = 0;
 
   if (!els.deviceBuzzBtn) return;
 
   els.deviceBuzzBtn.dataset.pending = "0";
-  els.deviceBuzzBtn.dataset.hardLocked = "0";
-  els.deviceBuzzBtn.dataset.lockedAt = "";
+  els.deviceBuzzBtn.style.pointerEvents = "";
 }
 
 function resetPlayerBuzzUiState(session) {
   if (!els.deviceBuzzBtn) return;
-
-  const btn = els.deviceBuzzBtn;
 
   const roundUiKey = [
     String(session.code || ""),
@@ -228,35 +225,21 @@ function resetPlayerBuzzUiState(session) {
     !session.timerRunning &&
     !session.answerExpired;
 
-  const localLockExpired =
-    Number(local.playerBuzzLockUntil || 0) > 0 &&
-    Date.now() >= Number(local.playerBuzzLockUntil || 0);
-
   if (
     Number(session.forceUnlockToken || 0) !==
     Number(local.lastSeenForceUnlockToken || 0)
   ) {
     local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
-    clearPlayerLocalBuzzLock();
+    clearPlayerLocalBuzzState();
   }
 
   if (local.lastPlayerRoundUiKey !== roundUiKey) {
     local.lastPlayerRoundUiKey = roundUiKey;
-    clearPlayerLocalBuzzLock();
+    clearPlayerLocalBuzzState();
   }
 
   if (roundIsFresh) {
-    clearPlayerLocalBuzzLock();
-  }
-
-  if (localLockExpired && !local.playerBuzzInFlight) {
-    clearPlayerLocalBuzzLock();
-  }
-
-  if (!local.playerBuzzInFlight && Date.now() >= Number(local.playerBuzzLockUntil || 0)) {
-    btn.dataset.pending = "0";
-    btn.dataset.hardLocked = "0";
-    btn.dataset.lockedAt = "";
+    clearPlayerLocalBuzzState();
   }
 }
 
@@ -755,18 +738,14 @@ export function renderSession(session) {
   resetPlayerBuzzUiState(session);
 
   if (els.deviceBuzzBtn) {
-    const localLockActive =
-      local.playerBuzzInFlight ||
-      Date.now() < Number(local.playerBuzzLockUntil || 0);
-
+    const localLockActive = local.playerBuzzInFlight;
     const enabled = !locallyFinished && canBuzz(session) && !localLockActive;
 
     els.deviceBuzzBtn.disabled = !enabled;
 
     if (!localLockActive) {
       els.deviceBuzzBtn.dataset.pending = "0";
-      els.deviceBuzzBtn.dataset.hardLocked = "0";
-      els.deviceBuzzBtn.dataset.lockedAt = "";
+      els.deviceBuzzBtn.style.pointerEvents = "";
     }
 
     const amIWinner =

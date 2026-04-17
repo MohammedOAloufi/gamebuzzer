@@ -74,6 +74,10 @@ async function getAccurateBuzzBlockReason() {
 
 async function handleBuzzInput() {
   try {
+    // 🔥 FIX: منع السبام
+    if (local.playerBuzzInFlight) return;
+    local.playerBuzzInFlight = true;
+
     const fixedTeamId = Number(local.playerTeamId);
     const fixedPlayerName = local.playerName || getCurrentPlayerName();
 
@@ -98,15 +102,26 @@ async function handleBuzzInput() {
 
     if (!ok) {
       const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
+
+      // 🔥 FIX مهم: فك التعليق
+      clearBuzzButtonDomLock();
+
       showToast(
         getBuzzRejectMessage(finalReason || "another_player_won"),
-        true,
+        true
       );
       return;
     }
   } catch (error) {
     console.error(error);
+
+    // 🔥 FIX مهم
+    clearBuzzButtonDomLock();
+
     showToast("تعذر إرسال الضغط", true);
+  } finally {
+    // 🔥 FIX
+    local.playerBuzzInFlight = false;
   }
 }
 

@@ -135,57 +135,34 @@ async function boot() {
   bindEvents();
   bindVisibilityEvents();
 
-  if (pageType === "home") {
-    return;
+  if (pageType === "home") return;
+
+  startUiTicker();
+
+  if (pageType === "player") {
+    loadPlayerDraft();
   }
 
-  loadPlayerDraft();
-  startUiTicker();
-  await startTickWorker();
+  if (pageType === "host") {
+    await startTickWorker();
+  }
 
   const queryCode = new URLSearchParams(location.search).get("session");
-  const cleanCode = String(queryCode || "")
-    .trim()
-    .toUpperCase();
+  const cleanCode = String(queryCode || "").trim().toUpperCase();
 
   if (!cleanCode) {
     showToast("لا يوجد كود جلسة في الرابط", true);
     return;
   }
 
-  const wasDeleted = await deleteSessionIfExpired(cleanCode);
-
-  if (wasDeleted) {
-    showToast("هذه الجلسة انتهت وتم حذفها", true);
-    return;
-  }
-
   if (pageType === "host") {
     const readyCode = await createOrLoadSession(cleanCode);
-
-    const url = new URL(window.location.href);
-    url.searchParams.set("session", readyCode);
-    window.history.replaceState({}, "", url.toString());
-
     showToast("تم تجهيز الجلسة");
     return;
   }
 
   if (pageType === "player") {
     showPlayerJoinView();
-
-    const snapshot = await get(sessionRef(cleanCode));
-
-    if (!snapshot.exists()) {
-      if (els.connectionBadge) {
-        els.connectionBadge.textContent = "الجلسة غير موجودة";
-        els.connectionBadge.className = "state-badge red";
-      }
-
-      showToast("هذه الجلسة غير موجودة", true);
-      return;
-    }
-
     await subscribeToSession(cleanCode);
   }
 }

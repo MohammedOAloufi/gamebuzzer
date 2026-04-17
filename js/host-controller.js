@@ -137,10 +137,15 @@ export async function cleanupInactiveSession() {
   }
 }
 
+let tickRunning = false;
+
 export async function startTickWorker() {
   if (pageType !== "host") return;
 
   setInterval(async () => {
+    if (tickRunning) return; // 🔥 FIX
+    tickRunning = true;
+
     try {
       await cleanupInactiveSession();
 
@@ -149,25 +154,14 @@ export async function startTickWorker() {
       const snapshot = await get(sessionRef(local.currentSessionCode));
       if (!snapshot.exists()) return;
 
-      const session = normalizeSession(
-        snapshot.val(),
-        local.currentSessionCode,
-      );
+      const session = normalizeSession(snapshot.val());
 
       if (!session.timerRunning || !session.roundEndsAt) return;
 
       const serverNow = getServerNow();
-      const leftMs = Number(session.roundEndsAt) - serverNow;
+      const leftMs = session.roundEndsAt - serverNow;
 
       if (leftMs <= 0) {
-        const cooldownEnabled = Number(session.cooldown || 0) > 0;
-        const roundAudioKey = buildRoundAudioKey(session);
-
-        if (startTickWorker._lastEndSoundKey !== roundAudioKey) {
-          playAudioSafe(els.endTimeAudio);
-          startTickWorker._lastEndSoundKey = roundAudioKey;
-        }
-
         await updateSessionPatch({
           timeLeft: 0,
           timerRunning: false,
@@ -175,32 +169,25 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
-          cooldownTeamId:
-            cooldownEnabled && session.winnerTeamId !== null
-              ? Number(session.winnerTeamId)
-              : null,
-          cooldownEndsAt:
-            cooldownEnabled && session.winnerTeamId !== null
-              ? serverNow + session.cooldown * 1000
-              : null,
           presses: null,
-          hostUpdatedAt: serverNow,
         });
 
         return;
       }
 
-      const nextLeft = Math.max(1, Math.ceil(leftMs / 1000));
+      const nextLeft = Math.ceil(leftMs / 1000);
 
       if (nextLeft !== session.timeLeft) {
         await updateSessionPatch({
           timeLeft: nextLeft,
         });
       }
-    } catch (error) {
-      console.error(error);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      tickRunning = false;
     }
-  }, 100);
+  }, 500); // 🔥 FIX (بدل 100)
 }
 
 function setSensitiveVisibility(visible) {

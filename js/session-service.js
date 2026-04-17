@@ -464,6 +464,8 @@ export async function claimBuzz(teamId, playerName = "") {
 
   if (!Number.isFinite(teamIdNum)) return false;
 
+  const attemptTime = getServerNow(); // 🔥 FIX
+
   const result = await runTransaction(
     sessionRef(local.currentSessionCode),
     (current) => {
@@ -477,24 +479,14 @@ export async function claimBuzz(teamId, playerName = "") {
       const locked = Boolean(current.locked);
       const answerExpired = Boolean(current.answerExpired);
       const roundId = Number(current.roundId || 1);
-      const cooldownTeamId =
-        current.cooldownTeamId === null || current.cooldownTeamId === undefined
-          ? null
-          : Number(current.cooldownTeamId);
-      const cooldownEndsAt = current.cooldownEndsAt ?? null;
-      const serverNow = getServerNow();
-
-      const myTeamCooldownActive =
-        cooldownTeamId !== null &&
-        cooldownTeamId === teamIdNum &&
-        Boolean(cooldownEndsAt) &&
-        serverNow < Number(cooldownEndsAt);
 
       const currentPresses =
         current.presses && typeof current.presses === "object"
           ? current.presses
           : {};
+
       const myCurrentPress = currentPresses[local.deviceId];
+
       const alreadyPressedThisRound =
         myCurrentPress &&
         Number(myCurrentPress.roundId || 0) === Number(roundId);
@@ -502,46 +494,36 @@ export async function claimBuzz(teamId, playerName = "") {
       if (
         locked ||
         (currentWinner !== null && !answerExpired) ||
-        myTeamCooldownActive ||
         alreadyPressedThisRound
       ) {
         return;
       }
 
       const maxTime = Number(current.maxTime || 3);
-      const nextPresses = { ...currentPresses };
-
-      nextPresses[local.deviceId] = {
-        teamId: teamIdNum,
-        playerName: safePlayerName,
-        pressedAt: serverNow,
-        roundId,
-      };
 
       return {
         ...current,
         winnerTeamId: teamIdNum,
         winnerPlayerName: safePlayerName,
         winnerPlayerId: local.deviceId,
-        winnerPressedAt: serverNow,
+        winnerPressedAt: attemptTime,
+
         locked: true,
         timerRunning: true,
         answerExpired: false,
-        roundStartedAt: serverNow,
-        roundEndsAt: serverNow + maxTime * 1000,
+
+        roundStartedAt: attemptTime,
+        roundEndsAt: attemptTime + maxTime * 1000,
+
         timeLeft: maxTime,
-        cooldownPlayerId: "",
-        cooldownTeamId: null,
-        cooldownEndsAt: null,
-        updatedAt: serverNow,
-        hostUpdatedAt: serverNow,
-        expiresAt: serverNow + SESSION_EXPIRY_MS,
-        presses: nextPresses,
+        presses: null,
+
+        updatedAt: attemptTime,
+        hostUpdatedAt: attemptTime,
+        expiresAt: attemptTime + SESSION_EXPIRY_MS,
       };
     },
-    {
-      applyLocally: false,
-    },
+    { applyLocally: false }
   );
 
   return result.committed === true;

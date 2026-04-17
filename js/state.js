@@ -50,6 +50,7 @@ export const local = {
   playerAttemptRoundId: null,
   playerUiRoundId: null,
   lastSeenForceUnlockToken: 0,
+  lastPressTriggerAt: 0,
 };
 
 export function getServerNow() {

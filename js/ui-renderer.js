@@ -726,8 +726,8 @@ export function renderSession(session) {
     els.deviceBuzzBtn.disabled = !enabled;
 
     if (!local.playerBuzzInFlight) {
-      els.deviceBuzzBtn.style.pointerEvents = "";
       els.deviceBuzzBtn.dataset.pending = "0";
+      els.deviceBuzzBtn.classList.remove("is-pending");
     }
 
     const amIWinner =

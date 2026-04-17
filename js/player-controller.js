@@ -45,19 +45,21 @@ function hasConfirmedAttemptThisRound() {
   return Number(local.playerAttemptRoundId) === Number(currentRoundId);
 }
 
-function lockBuzzButtonPendingOnly() {
+function setBuzzPendingUi(isPending) {
   if (!els.deviceBuzzBtn) return;
 
-  els.deviceBuzzBtn.disabled = true;
-  els.deviceBuzzBtn.dataset.pending = "1";
-  els.deviceBuzzBtn.style.pointerEvents = "none";
+  els.deviceBuzzBtn.disabled = Boolean(isPending);
+  els.deviceBuzzBtn.dataset.pending = isPending ? "1" : "0";
+
+  if (isPending) {
+    els.deviceBuzzBtn.classList.add("is-pending");
+  } else {
+    els.deviceBuzzBtn.classList.remove("is-pending");
+  }
 }
 
-function clearBuzzButtonDomLock() {
-  if (!els.deviceBuzzBtn) return;
-
-  els.deviceBuzzBtn.dataset.pending = "0";
-  els.deviceBuzzBtn.style.pointerEvents = "";
+export function clearBuzzButtonDomLock() {
+  setBuzzPendingUi(false);
 }
 
 async function getAccurateBuzzBlockReason() {
@@ -88,7 +90,7 @@ async function handleBuzzInput() {
     }
 
     local.playerBuzzInFlight = true;
-    lockBuzzButtonPendingOnly();
+    setBuzzPendingUi(true);
 
     const currentRoundId = getCurrentRoundIdFromLocalSession();
     const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
@@ -105,7 +107,6 @@ async function handleBuzzInput() {
       return;
     }
 
-    // لا نعتبر اللاعب ضغط هذه الجولة إلا بعد نجاح فعلي
     local.playerAttemptRoundId = currentRoundId;
     clearBuzzButtonDomLock();
   } catch (error) {
@@ -116,6 +117,49 @@ async function handleBuzzInput() {
   } finally {
     local.playerBuzzInFlight = false;
   }
+}
+
+function shouldIgnoreDuplicateMobileTrigger() {
+  const now = Date.now();
+  const delta = now - Number(local.lastPressTriggerAt || 0);
+
+  if (delta >= 0 && delta < 700) {
+    return true;
+  }
+
+  local.lastPressTriggerAt = now;
+  return false;
+}
+
+function bindBuzzButtonEvents() {
+  if (!els.deviceBuzzBtn) return;
+
+  const triggerBuzz = async (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    if (shouldIgnoreDuplicateMobileTrigger()) return;
+    await handleBuzzInput();
+  };
+
+  els.deviceBuzzBtn.addEventListener(
+    "touchend",
+    (event) => {
+      triggerBuzz(event);
+    },
+    { passive: false },
+  );
+
+  els.deviceBuzzBtn.addEventListener("click", (event) => {
+    triggerBuzz(event);
+  });
+
+  els.deviceBuzzBtn.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    triggerBuzz(event);
+  });
 }
 
 export function savePlayerDraft() {
@@ -276,12 +320,5 @@ export function bindPlayerEvents() {
     });
   }
 
-  if (els.deviceBuzzBtn) {
-    els.deviceBuzzBtn.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      handleBuzzInput();
-    });
-  }
+  bindBuzzButtonEvents();
 }
-
-export { clearBuzzButtonDomLock };

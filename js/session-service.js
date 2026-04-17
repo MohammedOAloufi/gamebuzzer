@@ -158,22 +158,6 @@ export function hasMyPressInCurrentRound(session) {
   return Number(myPress.roundId) === Number(session.roundId);
 }
 
-export function isSessionWaitingForFreshSync(session) {
-  const myPress = session.presses?.[local.deviceId];
-  if (!myPress) return false;
-
-  const sameRound = Number(myPress.roundId) === Number(session.roundId);
-  const roundLooksOpen =
-    session.winnerTeamId === null &&
-    !session.locked &&
-    !session.timerRunning &&
-    !session.answerExpired &&
-    !session.roundStartedAt &&
-    !session.roundEndsAt;
-
-  return sameRound && roundLooksOpen;
-}
-
 export function getBuzzBlockReason(session, options = {}) {
   const { strict = false } = options;
 
@@ -189,7 +173,6 @@ export function getBuzzBlockReason(session, options = {}) {
   }
 
   if (strict) {
-    if (isSessionWaitingForFreshSync(session)) return "session_not_updated";
     if (hasMyPressInCurrentRound(session)) return "already_pressed_this_round";
   }
 
@@ -197,7 +180,7 @@ export function getBuzzBlockReason(session, options = {}) {
 }
 
 export function canBuzz(session) {
-  return getBuzzBlockReason(session, { strict: false }) === null;
+  return getBuzzBlockReason(session, { strict: true }) === null;
 }
 
 export function getCooldownSecondsLeft(session) {
@@ -464,7 +447,7 @@ export async function claimBuzz(teamId, playerName = "") {
 
   if (!Number.isFinite(teamIdNum)) return false;
 
-  const attemptTime = getServerNow(); // 🔥 FIX
+  const attemptTime = getServerNow();
 
   const result = await runTransaction(
     sessionRef(local.currentSessionCode),
@@ -479,14 +462,23 @@ export async function claimBuzz(teamId, playerName = "") {
       const locked = Boolean(current.locked);
       const answerExpired = Boolean(current.answerExpired);
       const roundId = Number(current.roundId || 1);
+      const cooldownTeamId =
+        current.cooldownTeamId === null || current.cooldownTeamId === undefined
+          ? null
+          : Number(current.cooldownTeamId);
+      const cooldownEndsAt = current.cooldownEndsAt ?? null;
+
+      const myTeamCooldownActive =
+        cooldownTeamId !== null &&
+        cooldownTeamId === teamIdNum &&
+        Boolean(cooldownEndsAt) &&
+        attemptTime < Number(cooldownEndsAt);
 
       const currentPresses =
         current.presses && typeof current.presses === "object"
           ? current.presses
           : {};
-
       const myCurrentPress = currentPresses[local.deviceId];
-
       const alreadyPressedThisRound =
         myCurrentPress &&
         Number(myCurrentPress.roundId || 0) === Number(roundId);
@@ -494,12 +486,21 @@ export async function claimBuzz(teamId, playerName = "") {
       if (
         locked ||
         (currentWinner !== null && !answerExpired) ||
+        myTeamCooldownActive ||
         alreadyPressedThisRound
       ) {
         return;
       }
 
       const maxTime = Number(current.maxTime || 3);
+      const nextPresses = { ...currentPresses };
+
+      nextPresses[local.deviceId] = {
+        teamId: teamIdNum,
+        playerName: safePlayerName,
+        pressedAt: attemptTime,
+        roundId,
+      };
 
       return {
         ...current,
@@ -507,23 +508,24 @@ export async function claimBuzz(teamId, playerName = "") {
         winnerPlayerName: safePlayerName,
         winnerPlayerId: local.deviceId,
         winnerPressedAt: attemptTime,
-
         locked: true,
         timerRunning: true,
         answerExpired: false,
-
         roundStartedAt: attemptTime,
         roundEndsAt: attemptTime + maxTime * 1000,
-
         timeLeft: maxTime,
-        presses: null,
-
+        cooldownPlayerId: "",
+        cooldownTeamId: null,
+        cooldownEndsAt: null,
         updatedAt: attemptTime,
         hostUpdatedAt: attemptTime,
         expiresAt: attemptTime + SESSION_EXPIRY_MS,
+        presses: nextPresses,
       };
     },
-    { applyLocally: false }
+    {
+      applyLocally: false,
+    },
   );
 
   return result.committed === true;

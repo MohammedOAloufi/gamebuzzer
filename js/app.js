@@ -1,11 +1,8 @@
 import { els } from "./dom.js";
-import { pageType, local } from "./state.js";
+import { pageType, local, getServerNow } from "./state.js";
 import { get } from "./firebase.js";
 import { randomCode } from "./utils.js";
-import {
-  deleteSessionIfExpired,
-  sessionRef,
-} from "./session-service.js";
+import { deleteSessionIfExpired, sessionRef } from "./session-service.js";
 import {
   hideJoinError,
   showJoinError,
@@ -17,6 +14,7 @@ import {
   bindHostEvents,
   startTickWorker,
   stopHostHeartbeat,
+  stopTickWorker,
 } from "./host-controller.js";
 import {
   attachPresence,
@@ -109,7 +107,7 @@ function bindVisibilityEvents() {
       if (pageType === "host" && local.currentSessionCode) {
         const { updateSessionPatch } = await import("./session-service.js");
         await updateSessionPatch({
-          hostUpdatedAt: Date.now(),
+          hostUpdatedAt: getServerNow(),
         });
       }
 
@@ -128,6 +126,7 @@ function bindVisibilityEvents() {
   window.addEventListener("beforeunload", () => {
     stopPlayerHeartbeat();
     stopHostHeartbeat();
+    stopTickWorker();
   });
 }
 
@@ -135,7 +134,9 @@ async function boot() {
   bindEvents();
   bindVisibilityEvents();
 
-  if (pageType === "home") return;
+  if (pageType === "home") {
+    return;
+  }
 
   startUiTicker();
 
@@ -148,21 +149,48 @@ async function boot() {
   }
 
   const queryCode = new URLSearchParams(location.search).get("session");
-  const cleanCode = String(queryCode || "").trim().toUpperCase();
+  const cleanCode = String(queryCode || "")
+    .trim()
+    .toUpperCase();
 
   if (!cleanCode) {
     showToast("لا يوجد كود جلسة في الرابط", true);
     return;
   }
 
+  const wasDeleted = await deleteSessionIfExpired(cleanCode);
+
+  if (wasDeleted) {
+    showToast("هذه الجلسة انتهت وتم حذفها", true);
+    return;
+  }
+
   if (pageType === "host") {
     const readyCode = await createOrLoadSession(cleanCode);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("session", readyCode);
+    window.history.replaceState({}, "", url.toString());
+
     showToast("تم تجهيز الجلسة");
     return;
   }
 
   if (pageType === "player") {
     showPlayerJoinView();
+
+    const snapshot = await get(sessionRef(cleanCode));
+
+    if (!snapshot.exists()) {
+      if (els.connectionBadge) {
+        els.connectionBadge.textContent = "الجلسة غير موجودة";
+        els.connectionBadge.className = "state-badge red";
+      }
+
+      showToast("هذه الجلسة غير موجودة", true);
+      return;
+    }
+
     await subscribeToSession(cleanCode);
   }
 }

@@ -130,6 +130,7 @@ export async function cleanupInactiveSession() {
       local.currentSessionCode = "";
       local.lastSession = null;
       stopHostHeartbeat();
+      stopTickWorker();
       showToast("تم حذف الجلسة غير النشطة");
     }
   } catch (error) {
@@ -137,14 +138,22 @@ export async function cleanupInactiveSession() {
   }
 }
 
-let tickRunning = false;
+export function stopTickWorker() {
+  if (local.hostTickWorker) {
+    clearInterval(local.hostTickWorker);
+    local.hostTickWorker = null;
+  }
+}
 
 export async function startTickWorker() {
   if (pageType !== "host") return;
+  if (local.hostTickWorker) return;
 
-  setInterval(async () => {
-    if (tickRunning) return; // 🔥 FIX
-    tickRunning = true;
+  let isTickBusy = false;
+
+  local.hostTickWorker = setInterval(async () => {
+    if (isTickBusy) return;
+    isTickBusy = true;
 
     try {
       await cleanupInactiveSession();
@@ -154,14 +163,25 @@ export async function startTickWorker() {
       const snapshot = await get(sessionRef(local.currentSessionCode));
       if (!snapshot.exists()) return;
 
-      const session = normalizeSession(snapshot.val());
+      const session = normalizeSession(
+        snapshot.val(),
+        local.currentSessionCode,
+      );
 
       if (!session.timerRunning || !session.roundEndsAt) return;
 
       const serverNow = getServerNow();
-      const leftMs = session.roundEndsAt - serverNow;
+      const leftMs = Number(session.roundEndsAt) - serverNow;
 
       if (leftMs <= 0) {
+        const cooldownEnabled = Number(session.cooldown || 0) > 0;
+        const roundAudioKey = buildRoundAudioKey(session);
+
+        if (startTickWorker._lastEndSoundKey !== roundAudioKey) {
+          playAudioSafe(els.endTimeAudio);
+          startTickWorker._lastEndSoundKey = roundAudioKey;
+        }
+
         await updateSessionPatch({
           timeLeft: 0,
           timerRunning: false,
@@ -169,25 +189,34 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
+          cooldownTeamId:
+            cooldownEnabled && session.winnerTeamId !== null
+              ? Number(session.winnerTeamId)
+              : null,
+          cooldownEndsAt:
+            cooldownEnabled && session.winnerTeamId !== null
+              ? serverNow + session.cooldown * 1000
+              : null,
           presses: null,
+          hostUpdatedAt: serverNow,
         });
 
         return;
       }
 
-      const nextLeft = Math.ceil(leftMs / 1000);
+      const nextLeft = Math.max(1, Math.ceil(leftMs / 1000));
 
-      if (nextLeft !== session.timeLeft) {
+      if (nextLeft !== Number(session.timeLeft || 0)) {
         await updateSessionPatch({
           timeLeft: nextLeft,
         });
       }
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
     } finally {
-      tickRunning = false;
+      isTickBusy = false;
     }
-  }, 500); // 🔥 FIX (بدل 100)
+  }, 250);
 }
 
 function setSensitiveVisibility(visible) {

@@ -714,15 +714,21 @@ export function renderSession(session) {
 
   if (els.deviceBuzzBtn) {
     const playerBlockedReason = getBuzzBlockReason(session, { strict: true });
-    const localAlreadyTriedThisRound =
+    const localConfirmedAttemptThisRound =
       Number(local.playerAttemptRoundId) === Number(session.roundId);
 
     const enabled =
       !locallyFinished &&
+      !local.playerBuzzInFlight &&
       playerBlockedReason === null &&
-      !localAlreadyTriedThisRound;
+      !localConfirmedAttemptThisRound;
 
     els.deviceBuzzBtn.disabled = !enabled;
+
+    if (!local.playerBuzzInFlight) {
+      els.deviceBuzzBtn.style.pointerEvents = "";
+      els.deviceBuzzBtn.dataset.pending = "0";
+    }
 
     const amIWinner =
       session.winnerPlayerId && session.winnerPlayerId === local.deviceId;

@@ -20,8 +20,10 @@ export const SESSION_EXPIRY_MS = 600000;
 export const pageType = (() => {
   const path = window.location.pathname.toLowerCase();
 
-  if (path.includes("host.html")) return "host";
-  if (path.includes("player.html")) return "player";
+  if (path.endsWith("/host.html") || path.includes("host.html")) return "host";
+  if (path.endsWith("/player.html") || path.includes("player.html")) {
+    return "player";
+  }
 
   return "home";
 })();
@@ -39,12 +41,12 @@ export const local = {
   lastTeamsRenderKey: "",
   playerHeartbeat: null,
   hostHeartbeat: null,
+  hostTickWorker: null,
   serverTimeOffsetMs: 0,
   serverClockReady: false,
 
-  // 🔥 FIX
+  // player buzz state
   playerBuzzInFlight: false,
-
   playerAttemptRoundId: null,
   playerUiRoundId: null,
   lastSeenForceUnlockToken: 0,
@@ -56,7 +58,14 @@ export function getServerNow() {
 
 const serverOffsetRef = ref(db, ".info/serverTimeOffset");
 
-onValue(serverOffsetRef, (snapshot) => {
-  local.serverTimeOffsetMs = Number(snapshot.val() || 0);
-  local.serverClockReady = true;
-});
+onValue(
+  serverOffsetRef,
+  (snapshot) => {
+    local.serverTimeOffsetMs = Number(snapshot.val() || 0);
+    local.serverClockReady = true;
+  },
+  () => {
+    local.serverTimeOffsetMs = 0;
+    local.serverClockReady = false;
+  },
+);

@@ -28,8 +28,6 @@ function getBuzzRejectMessage(reason) {
       return "فريقك عليه منع";
     case "already_pressed_this_round":
       return "أنت مسجل ضغطة في هذه الجولة";
-    case "session_not_updated":
-      return "الجلسة لم تتحدث بعد";
     case "join_required":
       return "يجب الانضمام أولاً";
     default:
@@ -42,19 +40,15 @@ function getCurrentRoundIdFromLocalSession() {
   return Number.isFinite(parsed) ? parsed : 1;
 }
 
-function hasAttemptedThisRound() {
+function hasConfirmedAttemptThisRound() {
   const currentRoundId = getCurrentRoundIdFromLocalSession();
   return Number(local.playerAttemptRoundId) === Number(currentRoundId);
 }
 
-function lockBuzzButtonInDomForCurrentRound() {
-  const currentRoundId = getCurrentRoundIdFromLocalSession();
-  local.playerAttemptRoundId = currentRoundId;
-
+function lockBuzzButtonPendingOnly() {
   if (!els.deviceBuzzBtn) return;
 
   els.deviceBuzzBtn.disabled = true;
-  els.deviceBuzzBtn.dataset.lockedRoundId = String(currentRoundId);
   els.deviceBuzzBtn.dataset.pending = "1";
   els.deviceBuzzBtn.style.pointerEvents = "none";
 }
@@ -62,7 +56,6 @@ function lockBuzzButtonInDomForCurrentRound() {
 function clearBuzzButtonDomLock() {
   if (!els.deviceBuzzBtn) return;
 
-  els.deviceBuzzBtn.dataset.lockedRoundId = "";
   els.deviceBuzzBtn.dataset.pending = "0";
   els.deviceBuzzBtn.style.pointerEvents = "";
 }
@@ -74,9 +67,7 @@ async function getAccurateBuzzBlockReason() {
 
 async function handleBuzzInput() {
   try {
-    // 🔥 FIX: منع السبام
     if (local.playerBuzzInFlight) return;
-    local.playerBuzzInFlight = true;
 
     const fixedTeamId = Number(local.playerTeamId);
     const fixedPlayerName = local.playerName || getCurrentPlayerName();
@@ -91,36 +82,38 @@ async function handleBuzzInput() {
       return;
     }
 
-    if (hasAttemptedThisRound()) {
+    if (hasConfirmedAttemptThisRound()) {
       showToast("أنت مسجل ضغطة في هذه الجولة", true);
       return;
     }
 
-    lockBuzzButtonInDomForCurrentRound();
+    local.playerBuzzInFlight = true;
+    lockBuzzButtonPendingOnly();
 
+    const currentRoundId = getCurrentRoundIdFromLocalSession();
     const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
 
     if (!ok) {
-      const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
-
-      // 🔥 FIX مهم: فك التعليق
+      local.playerAttemptRoundId = null;
       clearBuzzButtonDomLock();
 
+      const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
       showToast(
         getBuzzRejectMessage(finalReason || "another_player_won"),
-        true
+        true,
       );
       return;
     }
+
+    // لا نعتبر اللاعب ضغط هذه الجولة إلا بعد نجاح فعلي
+    local.playerAttemptRoundId = currentRoundId;
+    clearBuzzButtonDomLock();
   } catch (error) {
     console.error(error);
-
-    // 🔥 FIX مهم
+    local.playerAttemptRoundId = null;
     clearBuzzButtonDomLock();
-
     showToast("تعذر إرسال الضغط", true);
   } finally {
-    // 🔥 FIX
     local.playerBuzzInFlight = false;
   }
 }

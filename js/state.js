@@ -44,8 +44,7 @@ export const local = {
   serverTimeOffsetMs: 0,
   serverClockReady: false,
 
-  // player buzz state
-  playerBuzzInFlight: false,
+  // buzz state
   playerAttemptRoundId: null,
   playerUiRoundId: null,
   lastSeenForceUnlockToken: 0,

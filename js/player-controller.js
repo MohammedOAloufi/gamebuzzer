@@ -18,8 +18,6 @@ import {
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
 
-const BUZZ_POINTER_THROTTLE_MS = 180;
-
 function getBuzzRejectMessage(reason) {
   switch (reason) {
     case "another_player_won":
@@ -39,50 +37,39 @@ function getBuzzRejectMessage(reason) {
   }
 }
 
-function setBuzzPendingState() {
-  local.playerBuzzPending = true;
-  local.playerPendingStartedAt = Date.now();
-
-  if (els.deviceBuzzBtn) {
-    els.deviceBuzzBtn.dataset.pending = "1";
-  }
-}
-
-function clearBuzzPendingState() {
-  local.playerBuzzPending = false;
-  local.playerPendingStartedAt = 0;
-
-  if (els.deviceBuzzBtn) {
-    els.deviceBuzzBtn.dataset.pending = "0";
-  }
-}
-
-async function getAccurateBuzzBlockReason() {
-  const session = await readCurrentSession();
-  return getBuzzBlockReason(session, { strict: true });
-}
-
-function setPointerThrottle(ms = BUZZ_POINTER_THROTTLE_MS) {
-  local.playerBuzzThrottleUntil = Date.now() + Math.max(0, Number(ms || 0));
-}
-
-function isPointerThrottled() {
-  return Date.now() < Number(local.playerBuzzThrottleUntil || 0);
-}
-
 function getCurrentRoundIdFromLocalSession() {
-  const raw = local.lastSession;
-  const parsed = Number(raw?.roundId);
+  const parsed = Number(local.lastSession?.roundId);
   return Number.isFinite(parsed) ? parsed : 1;
 }
 
 function hasAttemptedThisRound() {
   const currentRoundId = getCurrentRoundIdFromLocalSession();
-  return Number(local.lastBuzzAttemptRoundId) === Number(currentRoundId);
+  return Number(local.playerAttemptRoundId) === Number(currentRoundId);
 }
 
-function markAttemptForCurrentRound() {
-  local.lastBuzzAttemptRoundId = getCurrentRoundIdFromLocalSession();
+function lockBuzzButtonInDomForCurrentRound() {
+  const currentRoundId = getCurrentRoundIdFromLocalSession();
+  local.playerAttemptRoundId = currentRoundId;
+
+  if (!els.deviceBuzzBtn) return;
+
+  els.deviceBuzzBtn.disabled = true;
+  els.deviceBuzzBtn.dataset.lockedRoundId = String(currentRoundId);
+  els.deviceBuzzBtn.dataset.pending = "1";
+  els.deviceBuzzBtn.style.pointerEvents = "none";
+}
+
+function clearBuzzButtonDomLock() {
+  if (!els.deviceBuzzBtn) return;
+
+  els.deviceBuzzBtn.dataset.lockedRoundId = "";
+  els.deviceBuzzBtn.dataset.pending = "0";
+  els.deviceBuzzBtn.style.pointerEvents = "";
+}
+
+async function getAccurateBuzzBlockReason() {
+  const session = await readCurrentSession();
+  return getBuzzBlockReason(session, { strict: true });
 }
 
 async function handleBuzzInput() {
@@ -100,43 +87,26 @@ async function handleBuzzInput() {
       return;
     }
 
-    if (local.playerBuzzPending) {
-      return;
-    }
-
-    if (isPointerThrottled()) {
-      return;
-    }
-
     if (hasAttemptedThisRound()) {
       showToast("أنت مسجل ضغطة في هذه الجولة", true);
       return;
     }
 
-    setPointerThrottle(BUZZ_POINTER_THROTTLE_MS);
-    markAttemptForCurrentRound();
-    setBuzzPendingState();
+    lockBuzzButtonInDomForCurrentRound();
 
     const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
 
     if (!ok) {
       const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
-
       showToast(
         getBuzzRejectMessage(finalReason || "another_player_won"),
         true,
       );
-
-      clearBuzzPendingState();
       return;
     }
-
-    // لا نفك pending هنا.
-    // الرندر سيفكها عند تغير حالة مؤكدة في الجولة.
   } catch (error) {
     console.error(error);
     showToast("تعذر إرسال الضغط", true);
-    clearBuzzPendingState();
   }
 }
 
@@ -305,3 +275,5 @@ export function bindPlayerEvents() {
     });
   }
 }
+
+export { clearBuzzButtonDomLock };

@@ -14,6 +14,7 @@ import {
   changeTeamPoints,
   updateTeamName,
 } from "./session-service.js";
+import { clearBuzzButtonDomLock } from "./player-controller.js";
 
 function playAudioSafe(audioEl) {
   if (!audioEl) return;
@@ -198,10 +199,7 @@ function syncHostSounds(session, displayTimeRaw = null) {
 function clearPlayerRoundState() {
   local.playerBuzzInFlight = false;
   local.playerAttemptRoundId = null;
-
-  if (els.deviceBuzzBtn) {
-    els.deviceBuzzBtn.dataset.pending = "0";
-  }
+  clearBuzzButtonDomLock();
 }
 
 function resetPlayerBuzzUiState(session) {

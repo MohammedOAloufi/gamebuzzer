@@ -1,6 +1,9 @@
 import { els } from "./dom.js";
 import { pageType, local, PLAYER_HEARTBEAT_MS, getServerNow } from "./state.js";
 import { onDisconnect, set, update } from "./firebase.js";
+
+// الحد الأقصى للانتظار قبل فك القفل تلقائياً (5 ثوان)
+const BUZZ_INFLIGHT_TIMEOUT_MS = 5000;
 import {
   claimBuzz,
   getBuzzBlockReason,
@@ -62,42 +65,64 @@ export function clearBuzzButtonDomLock() {
   setBuzzPendingUi(false);
 }
 
+// يفك القفل كاملاً في أي حالة — يُستدعى من الـ timeout أو عند أي خطأ
+function forceReleaseBuzzLock() {
+  local.playerBuzzInFlight = false;
+
+  if (local.buzzInflightTimer) {
+    clearTimeout(local.buzzInflightTimer);
+    local.buzzInflightTimer = null;
+  }
+
+  clearBuzzButtonDomLock();
+}
+
 async function getAccurateBuzzBlockReason() {
   const session = await readCurrentSession();
   return getBuzzBlockReason(session, { strict: true });
 }
 
 async function handleBuzzInput() {
+  // منع الضغط المتكرر أثناء معالجة طلب سابق
+  if (local.playerBuzzInFlight) return;
+
+  const fixedTeamId = Number(local.playerTeamId);
+  const fixedPlayerName = local.playerName || getCurrentPlayerName();
+
+  if (!Number.isFinite(fixedTeamId)) {
+    showToast("اختر الفريق أولاً", true);
+    return;
+  }
+
+  if (!local.joinedPlayer) {
+    showToast("يجب الانضمام أولاً", true);
+    return;
+  }
+
+  if (hasConfirmedAttemptThisRound()) {
+    showToast("أنت مسجل ضغطة في هذه الجولة", true);
+    return;
+  }
+
+  // تفعيل القفل + timeout تلقائي يفك القفل بعد 5 ثوان في أسوأ حالة
+  local.playerBuzzInFlight = true;
+  setBuzzPendingUi(true);
+
+  if (local.buzzInflightTimer) {
+    clearTimeout(local.buzzInflightTimer);
+  }
+
+  local.buzzInflightTimer = setTimeout(() => {
+    console.warn("buzz lock timeout — releasing automatically");
+    forceReleaseBuzzLock();
+  }, BUZZ_INFLIGHT_TIMEOUT_MS);
+
   try {
-    if (local.playerBuzzInFlight) return;
-
-    const fixedTeamId = Number(local.playerTeamId);
-    const fixedPlayerName = local.playerName || getCurrentPlayerName();
-
-    if (!Number.isFinite(fixedTeamId)) {
-      showToast("اختر الفريق أولاً", true);
-      return;
-    }
-
-    if (!local.joinedPlayer) {
-      showToast("يجب الانضمام أولاً", true);
-      return;
-    }
-
-    if (hasConfirmedAttemptThisRound()) {
-      showToast("أنت مسجل ضغطة في هذه الجولة", true);
-      return;
-    }
-
-    local.playerBuzzInFlight = true;
-    setBuzzPendingUi(true);
-
     const currentRoundId = getCurrentRoundIdFromLocalSession();
     const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
 
     if (!ok) {
       local.playerAttemptRoundId = null;
-      clearBuzzButtonDomLock();
 
       const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
       showToast(
@@ -108,14 +133,13 @@ async function handleBuzzInput() {
     }
 
     local.playerAttemptRoundId = currentRoundId;
-    clearBuzzButtonDomLock();
   } catch (error) {
     console.error(error);
     local.playerAttemptRoundId = null;
-    clearBuzzButtonDomLock();
     showToast("تعذر إرسال الضغط", true);
   } finally {
-    local.playerBuzzInFlight = false;
+    // يفك القفل دائماً سواء نجح أو فشل
+    forceReleaseBuzzLock();
   }
 }
 
@@ -123,7 +147,7 @@ function shouldIgnoreDuplicateMobileTrigger() {
   const now = Date.now();
   const delta = now - Number(local.lastPressTriggerAt || 0);
 
-  if (delta >= 0 && delta < 700) {
+  if (delta >= 0 && delta < 1000) {
     return true;
   }
 

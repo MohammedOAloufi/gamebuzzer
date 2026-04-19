@@ -51,6 +51,7 @@ export const local = {
   playerUiRoundId: null,
   lastSeenForceUnlockToken: 0,
   lastPressTriggerAt: 0,
+  buzzInflightTimer: null, // timeout يفك قفل الـ buzz تلقائياً
 };
 
 export function getServerNow() {

@@ -71,26 +71,6 @@ function getBuzzRejectMessage(reason) {
 }
 
 /**
- * ✅ إصلاح Bug 6 (المستوى 2):
- * معالجة محسّنة لاستجابة buzz مع التحقق من إمكانية إعادة المحاولة
- * 
- * في الحالات النادرة التي قد تحدث فيها race condition (مثل press متزامن)،
- * لا تُظهر رسالة "سبقك لاعب" بل أزل القفل وسمح بـ retry
- */
-function shouldRetryBuzz(ok, localSession) {
-  if (ok) return false;
-
-  // لو كان الفشل بسبب "لاعب آخر سبقك"، عادة لا تُعيد المحاولة
-  // لكن في حالات race condition نادرة، أعد المحاولة مرة واحدة
-  const reason = localSession
-    ? getBuzzBlockReason(localSession, { strict: true })
-    : null;
-
-  // إذا كان السبب غامضاً أو مرتبطاً بـ timing، حاول مرة أخرى
-  return reason === "another_player_won" && !localSession?.winnerPlayerId;
-}
-
-/**
  * ✅ إصلاح Bug 6 (المستوى 1 - آلية الحماية):
  * تصفير آمن للـ buzz lock عند تحديث الجلسة
  * 
@@ -313,15 +293,8 @@ async function handleBuzzInput() {
         ? getBuzzBlockReason(localSession, { strict: true })
         : null;
 
-      // ✅ إصلاح Bug 6 (المستوى 2): في حالات race condition، حاول مرة أخرى
-      // بدلاً من عرض رسالة خطأ (يعطي فرصة أخيرة للاعب)
-      if (shouldRetryBuzz(ok, localSession)) {
-        console.log("buzz failed with ambiguous reason — retrying once");
-        // نستدعي handleBuzzInput مرة أخرى بدلاً من الفشل مباشرة
-        // لكن نتأكد من عدم الدخول في حلقة لا نهائية بـ buzzToken
-        return;
-      }
-
+      // ❌ إزالة shouldRetryBuzz لأنها تسبب deadlock
+      // عند فشل claimBuzz (لاعب آخر سبقك)، فقط اعرض الرسالة
       showToast(getBuzzRejectMessage(localReason || "another_player_won"), true);
       return;
     }

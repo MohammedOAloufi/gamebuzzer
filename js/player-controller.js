@@ -90,8 +90,9 @@ export function resetBuzzLockIfStale(session) {
     console.log(
       `resetBuzzLockIfStale: round changed (${buzzRoundId} → ${currentRoundId}) — releasing lock`
     );
-    local.buzzToken = (local.buzzToken || 0) + 1;
-    forceReleaseBuzzLock();
+    const newToken = (local.buzzToken || 0) + 1;
+    local.buzzToken = newToken;
+    forceReleaseBuzzLock(newToken);
     return;
   }
 
@@ -101,8 +102,9 @@ export function resetBuzzLockIfStale(session) {
   const buzzAge = now - Number(local.buzzStartedAt || 0);
   if (buzzAge > 5000) {
     console.log(`resetBuzzLockIfStale: stale buzz (${buzzAge}ms old) — releasing lock`);
-    local.buzzToken = (local.buzzToken || 0) + 1;
-    forceReleaseBuzzLock();
+    const newToken = (local.buzzToken || 0) + 1;
+    local.buzzToken = newToken;
+    forceReleaseBuzzLock(newToken);
     return;
   }
 }
@@ -144,8 +146,9 @@ export function clearPlayerRoundState(newRoundId) {
     // إذا كان هناك buzz معلق من جولة قديمة، فك قفله فوراً
     if (local.playerBuzzInFlight) {
       console.log("clearPlayerRoundState: clearing stale buzz lock from old round");
-      local.buzzToken = (local.buzzToken || 0) + 1;
-      forceReleaseBuzzLock();
+      const newToken = (local.buzzToken || 0) + 1;
+      local.buzzToken = newToken;
+      forceReleaseBuzzLock(newToken);
     }
 
     // مسح debounce window لضمان الاستجابة الفورية في الجولة الجديدة
@@ -225,8 +228,9 @@ async function handleBuzzInput() {
     if (buzzAge > 3000) {
       // القفل معلق أكثر من 3 ثواني → فك القفل بالقوة وحاول مجدداً
       console.warn(`Guard: buzz lock stale (${buzzAge}ms) — force releasing and retrying`);
-      local.buzzToken = (local.buzzToken || 0) + 1;
-      forceReleaseBuzzLock();
+      const newToken = (local.buzzToken || 0) + 1;
+      local.buzzToken = newToken;
+      forceReleaseBuzzLock(newToken);
       // استمر في المعالجة (لا تُرجع)
     } else {
       // لا تزال في انتظار (< 3 ثواني)
@@ -240,16 +244,19 @@ async function handleBuzzInput() {
 
   if (!Number.isFinite(fixedTeamId)) {
     showToast("اختر الفريق أولاً", true);
+    local.playerBuzzInFlight = false;
     return;
   }
 
   if (!local.joinedPlayer) {
     showToast("يجب الانضمام أولاً", true);
+    local.playerBuzzInFlight = false;
     return;
   }
 
   if (hasConfirmedAttemptThisRound()) {
     showToast("أنت مسجل ضغطة في هذه الجولة", true);
+    local.playerBuzzInFlight = false;
     return;
   }
 
@@ -260,8 +267,6 @@ async function handleBuzzInput() {
 
   // حفظ roundId لحظة بدء الطلب — نقارنه لاحقاً للتحقق من أن الجولة لم تتغير
   const roundIdAtBuzzStart = getCurrentRoundIdFromLocalSession();
-
-  local.playerBuzzInFlight = true;
 
   // ✅ إصلاح Bug 6 (المستوى 1): احفظ معرّف الجولة عند بدء الـ buzz
   // لاستخدامه في resetBuzzLockIfStale للكشف عن تغيير الجولة
@@ -375,14 +380,22 @@ function bindBuzzButtonEvents() {
       event.stopPropagation();
     }
 
-    // ✅ إضافة guard سريعة: منع spam متتالي
+    // ✅ منع spam: حجب فوري قبل حتى handleBuzzInput
     if (local.playerBuzzInFlight) {
-      console.warn(`bindBuzzButtonEvents: buzz already in flight — ignoring`);
+      console.warn(`buzz already in flight — ignoring`);
       return;
     }
 
     if (shouldIgnoreDuplicateMobileTrigger()) return;
-    await handleBuzzInput();
+    
+    // ✅ ضبط الـ flag فوراً قبل await
+    local.playerBuzzInFlight = true;
+    
+    try {
+      await handleBuzzInput();
+    } finally {
+      // لا نفك هنا - handleBuzzInput تفك عن طريق finally الخاصة بها
+    }
   };
 
   // touchend أولاً لاستجابة فورية على الجوال (قبل ظهور click بـ 300ms)
@@ -431,8 +444,9 @@ export function startBuzzLockCleanupTimer() {
         console.warn(
           `Background cleanup: buzz lock stale (${buzzAge}ms) — force releasing`
         );
-        local.buzzToken = (local.buzzToken || 0) + 1;
-        forceReleaseBuzzLock();
+        const newToken = (local.buzzToken || 0) + 1;
+        local.buzzToken = newToken;
+        forceReleaseBuzzLock(newToken);
       }
     }
   }, 10000); // كل 10 ثواني

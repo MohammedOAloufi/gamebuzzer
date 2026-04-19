@@ -52,6 +52,7 @@ export const local = {
   lastSeenForceUnlockToken: 0,
   lastPressTriggerAt: 0,
   buzzInflightTimer: null, // timeout يفك قفل الـ buzz تلقائياً
+  buzzToken: 0,           // رقم فريد لكل طلب buzz — يمنع الـ finally القديم من التدخل
 };
 
 export function getServerNow() {

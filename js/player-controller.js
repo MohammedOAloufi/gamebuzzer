@@ -1,14 +1,12 @@
 import { els } from "./dom.js";
 import { pageType, local, PLAYER_HEARTBEAT_MS, getServerNow } from "./state.js";
 import { onDisconnect, set, update } from "./firebase.js";
-
-// الحد الأقصى للانتظار قبل فك القفل تلقائياً (5 ثوان)
-const BUZZ_INFLIGHT_TIMEOUT_MS = 5000;
 import {
   claimBuzz,
   getBuzzBlockReason,
   getCurrentPlayerName,
   getSelectedTeamId,
+  normalizeSession,
   readCurrentSession,
   refreshSessionExpiry,
   presenceRef,
@@ -20,6 +18,9 @@ import {
   showToast,
 } from "./ui-renderer.js";
 import { sanitizeName } from "./utils.js";
+
+// الحد الأقصى للانتظار قبل فك القفل تلقائياً (5 ثوان)
+const BUZZ_INFLIGHT_TIMEOUT_MS = 5000;
 
 function getBuzzRejectMessage(reason) {
   switch (reason) {
@@ -66,7 +67,10 @@ export function clearBuzzButtonDomLock() {
 }
 
 // يفك القفل كاملاً في أي حالة — يُستدعى من الـ timeout أو عند أي خطأ
-function forceReleaseBuzzLock() {
+function forceReleaseBuzzLock(token) {
+  // لو الطلب الحالي مختلف عن اللي طلب الفك، نتجاهل
+  if (token !== undefined && local.buzzToken !== token) return;
+
   local.playerBuzzInFlight = false;
 
   if (local.buzzInflightTimer) {
@@ -104,7 +108,10 @@ async function handleBuzzInput() {
     return;
   }
 
-  // تفعيل القفل + timeout تلقائي يفك القفل بعد 5 ثوان في أسوأ حالة
+  // token فريد لهذا الطلب — يمنع الـ finally القديم من فك قفل طلب جديد
+  local.buzzToken = (local.buzzToken || 0) + 1;
+  const myToken = local.buzzToken;
+
   local.playerBuzzInFlight = true;
   setBuzzPendingUi(true);
 
@@ -114,7 +121,7 @@ async function handleBuzzInput() {
 
   local.buzzInflightTimer = setTimeout(() => {
     console.warn("buzz lock timeout — releasing automatically");
-    forceReleaseBuzzLock();
+    forceReleaseBuzzLock(myToken);
   }, BUZZ_INFLIGHT_TIMEOUT_MS);
 
   try {
@@ -124,9 +131,18 @@ async function handleBuzzInput() {
     if (!ok) {
       local.playerAttemptRoundId = null;
 
-      const finalReason = await getAccurateBuzzBlockReason().catch(() => null);
+      // نقرأ السبب من الجلسة المحلية مباشرة — بدون طلب Firebase إضافي
+      // لتجنب race condition بين الطلب القديم والطلب الجديد
+      const localSession = local.lastSession
+        ? normalizeSession(local.lastSession, local.currentSessionCode)
+        : null;
+
+      const localReason = localSession
+        ? getBuzzBlockReason(localSession, { strict: true })
+        : null;
+
       showToast(
-        getBuzzRejectMessage(finalReason || "another_player_won"),
+        getBuzzRejectMessage(localReason || "another_player_won"),
         true,
       );
       return;
@@ -138,8 +154,8 @@ async function handleBuzzInput() {
     local.playerAttemptRoundId = null;
     showToast("تعذر إرسال الضغط", true);
   } finally {
-    // يفك القفل دائماً سواء نجح أو فشل
-    forceReleaseBuzzLock();
+    // يفك القفل فقط إذا كان هذا الطلب هو صاحب القفل الحالي
+    forceReleaseBuzzLock(myToken);
   }
 }
 

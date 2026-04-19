@@ -9,10 +9,10 @@
  *             يمنع التعليق الصامت عندما يعود claimBuzz بعد reset الجولة
  * ✅ إصلاح 4: حذف background get في مسار ok=false — onValue يتكفل بتحديث lastSession
  * ✅ إصلاح 5: تسجيل buzzStartedAt عند بدء كل buzz لمنح safety valve في renderSession
- * ✅ إصلاح 6: آلية حماية 3-مستويات ضد deadlock buzz:
- *             - المستوى 1: resetBuzzLockIfStale() فك فوري عند تغيير الجولة
- *             - المستوى 2: shouldRetryBuzz() إعادة محاولة في حالات race condition
- *             - المستوى 3: clearPlayerRoundState() تنظيف عند تغيير الجولة
+ * ✅ إصلاح 6 (النهائي): حل deadlock بثلاث آليات:
+ *             - Guard محسّن: يفك القفل إذا مضت > 3 ثواني ويحاول مجدداً فوراً
+ *             - startBuzzLockCleanupTimer: timer في الخلفية يفك القفل كل 10 ثواني
+ *             - clearPlayerRoundState: تنظيف عند تغيير الجولة
  */
 
 import { els } from "./dom.js";
@@ -235,7 +235,20 @@ function forceReleaseBuzzLock(token) {
 
 async function handleBuzzInput() {
   // ─── Guard 1: منع الضغط المتكرر أثناء معالجة طلب سابق ───
-  if (local.playerBuzzInFlight) return;
+  // ✅ إصلاح محسّن: إذا مضت > 3 ثواني، فك القفل وحاول مجدداً
+  if (local.playerBuzzInFlight) {
+    const buzzAge = Date.now() - Number(local.buzzStartedAt || 0);
+    if (buzzAge > 3000) {
+      // القفل معلق أكثر من 3 ثواني → فك القفل بالقوة وحاول مجدداً
+      console.warn(`Guard: buzz lock stale (${buzzAge}ms) — force releasing and retrying`);
+      local.buzzToken = (local.buzzToken || 0) + 1;
+      forceReleaseBuzzLock();
+      // استمر في المعالجة (لا تُرجع)
+    } else {
+      // لا تزال في انتظار (< 3 ثواني)
+      return;
+    }
+  }
 
   // ─── Guard 2: التحقق من بيانات اللاعب ───
   const fixedTeamId = Number(local.playerTeamId);
@@ -409,6 +422,40 @@ function bindBuzzButtonEvents() {
 }
 
 // ─────────────────────────────────────────────
+// Background Buzz Lock Cleanup
+// ─────────────────────────────────────────────
+
+/**
+ * ✅ إصلاح نهائي: Cleanup timer في الخلفية
+ * يفك القفل كل 10 ثواني إذا كان معلقاً
+ * هذا يضمن عدم التعليق حتى لو فشلت كل الآليات الأخرى
+ */
+export function startBuzzLockCleanupTimer() {
+  if (pageType !== "player") return;
+
+  // إلغاء أي timer قديم
+  if (local.buzzLockCleanupTimer) {
+    clearInterval(local.buzzLockCleanupTimer);
+  }
+
+  // بدء timer جديد كل 10 ثواني
+  local.buzzLockCleanupTimer = setInterval(() => {
+    if (local.playerBuzzInFlight) {
+      const buzzAge = Date.now() - Number(local.buzzStartedAt || 0);
+      
+      // إذا مضت > 10 ثواني، فك القفل بالقوة
+      if (buzzAge > 10000) {
+        console.warn(
+          `Background cleanup: buzz lock stale (${buzzAge}ms) — force releasing`
+        );
+        local.buzzToken = (local.buzzToken || 0) + 1;
+        forceReleaseBuzzLock();
+      }
+    }
+  }, 10000); // كل 10 ثواني
+}
+
+// ─────────────────────────────────────────────
 // Player Draft (sessionStorage)
 // ─────────────────────────────────────────────
 
@@ -562,6 +609,7 @@ export function bindPlayerEvents() {
         showPlayerBuzzerView();
         await attachPresence(local.currentSessionCode);
         startPresenceHeartbeat();
+        startBuzzLockCleanupTimer();  // ✅ بدء الـ cleanup timer
 
         const session = await readCurrentSession();
         renderPlayerTeam(session);

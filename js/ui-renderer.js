@@ -673,10 +673,6 @@ export function renderSession(session) {
   // ✅ إصلاح Bug 6 (المستوى 3): تنظيف حالة اللاعب عند تغيير الجولة
   clearPlayerRoundStateGuard(session.roundId);
 
-  // ✅ إصلاح Bug 6 (المستوى 1): فك القفل تلقائياً إذا أصبح الـ buzz معلقاً غير مطلوب
-  // (مثلاً بسبب تغيير الجولة أو مرور وقت طويل)
-  resetBuzzLockIfStale(session);
-
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
   if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;

@@ -1,6 +1,15 @@
+/**
+ * ui-renderer.js
+ * طبقة العرض — كل منطق تحديث الـ DOM
+ *
+ * ✅ إصلاح 1: progressBar — كلاس "expired" يُضاف الآن بشكل صحيح عند انتهاء الوقت
+ * ✅ إصلاح 2: تمت إزالة playAudioSafe المكررة — مستوردة من utils.js
+ * ✅ إصلاح 3: startUiTicker تحفظ الآن reference للـ interval في local
+ */
+
 import { els } from "./dom.js";
 import { local, pageType, getServerNow } from "./state.js";
-import { escapeHtml, getPlayerJoinUrl } from "./utils.js";
+import { escapeHtml, getPlayerJoinUrl, playAudioSafe } from "./utils.js";
 import {
   getBuzzBlockReason,
   getCooldownSecondsLeft,
@@ -16,21 +25,9 @@ import {
 } from "./session-service.js";
 import { clearBuzzButtonDomLock } from "./player-controller.js";
 
-function playAudioSafe(audioEl) {
-  if (!audioEl) return;
-
-  try {
-    audioEl.pause();
-    audioEl.currentTime = 0;
-
-    const playPromise = audioEl.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {});
-    }
-  } catch (error) {
-    console.error(error);
-  }
-}
+// ─────────────────────────────────────────────
+// Countdown Audio Pool
+// ─────────────────────────────────────────────
 
 function ensureCountdownPool(audioEl) {
   if (!audioEl) return [];
@@ -41,7 +38,7 @@ function ensureCountdownPool(audioEl) {
 
   const src =
     audioEl.currentSrc ||
-    audioEl.querySelector("source")?.src ||
+    audioEl.querySelector?.("source")?.src ||
     audioEl.getAttribute("src") ||
     "";
 
@@ -84,9 +81,13 @@ function playCountdownTick(audioEl) {
       playPromise.catch(() => {});
     }
   } catch (error) {
-    console.error(error);
+    console.error("playCountdownTick error:", error);
   }
 }
+
+// ─────────────────────────────────────────────
+// Sound State Snapshot
+// ─────────────────────────────────────────────
 
 function cloneSoundSession(session) {
   return {
@@ -111,6 +112,10 @@ function cloneSoundSession(session) {
   };
 }
 
+// ─────────────────────────────────────────────
+// Timer Display
+// ─────────────────────────────────────────────
+
 function formatCountdownValue(value, showDecimal = false) {
   const safeValue = Math.max(0, Number(value || 0));
 
@@ -120,6 +125,10 @@ function formatCountdownValue(value, showDecimal = false) {
 
   return safeValue.toFixed(1);
 }
+
+// ─────────────────────────────────────────────
+// Host Sound Sync
+// ─────────────────────────────────────────────
 
 function syncHostSounds(session, displayTimeRaw = null) {
   if (pageType !== "host") return;
@@ -196,6 +205,10 @@ function syncHostSounds(session, displayTimeRaw = null) {
   syncHostSounds._prevSession = cloneSoundSession(session);
 }
 
+// ─────────────────────────────────────────────
+// Player Round State Reset
+// ─────────────────────────────────────────────
+
 function clearPlayerRoundState() {
   // رفع الـ token يلغي أي finally قديم معلق من handleBuzzInput
   local.buzzToken = (local.buzzToken || 0) + 1;
@@ -233,6 +246,10 @@ function resetPlayerBuzzUiState(session) {
   }
 }
 
+// ─────────────────────────────────────────────
+// Toast Notification
+// ─────────────────────────────────────────────
+
 export function showToast(message, isError = false) {
   if (!els.toast) return;
 
@@ -246,6 +263,10 @@ export function showToast(message, isError = false) {
     els.toast.classList.remove("show");
   }, 1800);
 }
+
+// ─────────────────────────────────────────────
+// Join View Helpers
+// ─────────────────────────────────────────────
 
 export function showJoinError(message) {
   if (!els.joinErrorMessage) return;
@@ -268,6 +289,10 @@ export function showPlayerBuzzerView() {
   if (els.buzzerView) els.buzzerView.classList.remove("hidden");
 }
 
+// ─────────────────────────────────────────────
+// QR Code
+// ─────────────────────────────────────────────
+
 export function updateQRCode(code = local.currentSessionCode) {
   if (!els.qrcode || typeof QRCode === "undefined") return;
   if (!code) return;
@@ -286,6 +311,10 @@ export function updateQRCode(code = local.currentSessionCode) {
 
   local.lastQrCodeValue = code;
 }
+
+// ─────────────────────────────────────────────
+// Winner Rendering
+// ─────────────────────────────────────────────
 
 export function renderWinner(session) {
   if (!els.winnerEmpty || !els.winnerBox || !els.winnerName) return;
@@ -335,6 +364,10 @@ export function renderWinner(session) {
       : winnerTeam.name;
   }
 }
+
+// ─────────────────────────────────────────────
+// Host Buzz Grid
+// ─────────────────────────────────────────────
 
 export function renderHostBuzzButtons(session) {
   if (!els.hostBuzzGrid) return;
@@ -401,6 +434,10 @@ export function renderHostBuzzButtons(session) {
   });
 }
 
+// ─────────────────────────────────────────────
+// Team Manager
+// ─────────────────────────────────────────────
+
 export function renderTeamManager(session) {
   if (!els.teamManageList) return;
 
@@ -420,10 +457,7 @@ export function renderTeamManager(session) {
   );
 
   if (local.lastTeamsRenderKey === renderKey) return;
-
-  if (isEditingTeamName) {
-    return;
-  }
+  if (isEditingTeamName) return;
 
   local.lastTeamsRenderKey = renderKey;
   els.teamManageList.innerHTML = "";
@@ -443,7 +477,7 @@ export function renderTeamManager(session) {
       try {
         await removeTeam(team.id);
       } catch (error) {
-        console.error(error);
+        console.error("removeTeam error:", error);
         showToast(error.message || "تعذر حذف الفريق", true);
       }
     });
@@ -463,7 +497,7 @@ export function renderTeamManager(session) {
           await updateTeamName(team.id, newName);
           local.lastTeamsRenderKey = "";
         } catch (error) {
-          console.error(error);
+          console.error("updateTeamName (input) error:", error);
           showToast("تعذر تحديث اسم الفريق", true);
         }
       }, 250);
@@ -476,7 +510,7 @@ export function renderTeamManager(session) {
         await updateTeamName(team.id, name);
         local.lastTeamsRenderKey = "";
       } catch (error) {
-        console.error(error);
+        console.error("updateTeamName (blur) error:", error);
         showToast("تعذر تحديث اسم الفريق", true);
       }
     });
@@ -492,7 +526,7 @@ export function renderTeamManager(session) {
           local.lastTeamsRenderKey = "";
           input.blur();
         } catch (error) {
-          console.error(error);
+          console.error("updateTeamName (keydown) error:", error);
           showToast("تعذر تحديث اسم الفريق", true);
         }
       }
@@ -511,7 +545,7 @@ export function renderTeamManager(session) {
       try {
         await changeTeamPoints(team.id, 1);
       } catch (error) {
-        console.error(error);
+        console.error("changeTeamPoints (+) error:", error);
         showToast("تعذر زيادة النقاط", true);
       }
     });
@@ -530,7 +564,7 @@ export function renderTeamManager(session) {
       try {
         await changeTeamPoints(team.id, -1);
       } catch (error) {
-        console.error(error);
+        console.error("changeTeamPoints (-) error:", error);
         showToast("تعذر إنقاص النقاط", true);
       }
     });
@@ -546,6 +580,10 @@ export function renderTeamManager(session) {
     els.teamManageList.appendChild(row);
   });
 }
+
+// ─────────────────────────────────────────────
+// Team Select (Player)
+// ─────────────────────────────────────────────
 
 export function renderTeamSelect(session) {
   if (!els.selectedTeam) return;
@@ -622,6 +660,10 @@ export function renderPlayerTeam(session) {
   }
 }
 
+// ─────────────────────────────────────────────
+// Main Session Render
+// ─────────────────────────────────────────────
+
 export function renderSession(session) {
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
@@ -671,10 +713,11 @@ export function renderSession(session) {
     els.cooldownTimeLeft.textContent = String(cooldownDisplay);
   }
 
+  // ✅ إصلاح: progressBar — كلاس "expired" يُضاف الآن بشكل صحيح
   if (els.progressBar) {
     if (isExpiredDisplay) {
       els.progressBar.style.width = "100%";
-      els.progressBar.classList.remove("expired");
+      els.progressBar.classList.add("expired");    // ← كان "remove" خطأً
     } else {
       els.progressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
       els.progressBar.classList.remove("expired");
@@ -774,11 +817,19 @@ export function renderSession(session) {
   syncHostSounds(session, displayTimeRaw);
 }
 
+// ─────────────────────────────────────────────
+// UI Ticker
+// ─────────────────────────────────────────────
+
+/**
+ * يبدأ الـ UI ticker المحلي (100ms) لتحديث العداد بين استقبال الرسائل.
+ * ✅ إصلاح: يحفظ الـ interval في local.uiTicker لإمكانية إيقافه لاحقاً.
+ */
 export function startUiTicker() {
   if (local.uiTickerStarted) return;
   local.uiTickerStarted = true;
 
-  setInterval(() => {
+  local.uiTicker = setInterval(() => {
     if (!local.lastSession) return;
 
     const session = normalizeSession(
@@ -786,6 +837,7 @@ export function startUiTicker() {
       local.currentSessionCode,
     );
 
+    // تطبيق انتهاء الـ cooldown محلياً دون انتظار Firebase
     if (
       session.cooldownTeamId !== null &&
       session.cooldownEndsAt &&
@@ -797,4 +849,15 @@ export function startUiTicker() {
 
     renderSession(session);
   }, 100);
+}
+
+/**
+ * يوقف الـ UI ticker — مفيد عند الحاجة لإعادة التشغيل
+ */
+export function stopUiTicker() {
+  if (local.uiTicker) {
+    clearInterval(local.uiTicker);
+    local.uiTicker = null;
+  }
+  local.uiTickerStarted = false;
 }

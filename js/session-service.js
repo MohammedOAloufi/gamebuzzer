@@ -1,3 +1,8 @@
+/**
+ * session-service.js
+ * طبقة البيانات — كل العمليات على Firebase للجلسات
+ */
+
 import { db, ref, set, update, get, runTransaction } from "./firebase.js";
 import {
   TEAM_COLORS,
@@ -7,6 +12,10 @@ import {
 } from "./state.js";
 import { sanitizeName, getTeamDisplayNameByColor } from "./utils.js";
 import { els } from "./dom.js";
+
+// ─────────────────────────────────────────────
+// Default Data
+// ─────────────────────────────────────────────
 
 export function defaultTeams() {
   return [
@@ -25,6 +34,10 @@ export function defaultTeams() {
   ];
 }
 
+// ─────────────────────────────────────────────
+// Firebase Refs
+// ─────────────────────────────────────────────
+
 export function sessionRef(code) {
   return ref(db, `sessions/${code}`);
 }
@@ -40,6 +53,10 @@ export function pressesRef(code) {
 export function myPressRef(code) {
   return ref(db, `sessions/${code}/presses/${local.deviceId}`);
 }
+
+// ─────────────────────────────────────────────
+// Session Normalization
+// ─────────────────────────────────────────────
 
 export function normalizeSession(raw, code) {
   const safeTeams =
@@ -111,6 +128,10 @@ export function normalizeSession(raw, code) {
     })),
   };
 }
+
+// ─────────────────────────────────────────────
+// Session Query Helpers
+// ─────────────────────────────────────────────
 
 export function getWinnerTeam(session) {
   return session.teams.find((team) => team.id === session.winnerTeamId) || null;
@@ -219,6 +240,10 @@ export function getSortedPresses(session) {
       return String(a.deviceId).localeCompare(String(b.deviceId));
     });
 }
+
+// ─────────────────────────────────────────────
+// Session Lifecycle
+// ─────────────────────────────────────────────
 
 export async function deleteSessionIfExpired(code) {
   const snapshot = await get(sessionRef(code));
@@ -365,6 +390,10 @@ export async function updateSessionPatch(patch) {
   });
 }
 
+/**
+ * يُعيد ضبط الجولة من جذورها.
+ * يستخدم session.maxTime فقط (بيانات الخادم) — لا يعتمد على DOM.
+ */
 export async function resetToFreshRound(session, extraPatch = {}) {
   await updateSessionPatch({
     winnerTeamId: null,
@@ -378,7 +407,8 @@ export async function resetToFreshRound(session, extraPatch = {}) {
     roundEndsAt: null,
     roundId: Number(session.roundId || 1) + 1,
     presses: null,
-    timeLeft: session.maxTime || Number(els.timeSelector?.value || 3),
+    // ✅ إصلاح: نعتمد على session.maxTime من الخادم فقط، لا على DOM
+    timeLeft: Number(session.maxTime) || 3,
     ...extraPatch,
     hostUpdatedAt: getServerNow(),
   });
@@ -469,7 +499,6 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
       const cooldownEndsAt = current.cooldownEndsAt ?? null;
 
       // الحماية الأساسية: لو تغيرت الجولة منذ بدأنا الطلب نلغي التراكنزاكشن
-      // هذا يمنع الـ retry التلقائي من Firebase من الضغط في جولة جديدة بالغلط
       if (
         expectedRoundId !== undefined &&
         Number.isFinite(expectedRoundId) &&
@@ -541,10 +570,6 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
   return result.committed === true;
 }
 
-export async function resolveWinnerFromPresses() {
-  return;
-}
-
 export async function addPoint() {
   const session = await readCurrentSession();
   if (session.winnerTeamId == null) return;
@@ -578,9 +603,15 @@ export async function changeTeamPoints(teamId, amount) {
   });
 }
 
+/**
+ * يضيف فريقاً جديداً باستخدام ID فريد cryptographically safe
+ * ✅ إصلاح: استبدال getServerNow() بـ random uint32 لتجنب تعارض ID
+ */
 export async function addTeam() {
   const session = await readCurrentSession();
-  const nextId = getServerNow();
+
+  // ID فريد وغير متكرر حتى لو أُضيف فريقان في نفس اللحظة
+  const nextId = Number(crypto.getRandomValues(new Uint32Array(1))[0]);
 
   const usedColors = session.teams.map((team) => team.colorClass);
   const availableColors = TEAM_COLORS.filter(

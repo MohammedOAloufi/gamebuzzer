@@ -1,3 +1,10 @@
+/**
+ * host-controller.js
+ * منطق المشرف — الـ heartbeat، الـ tick worker، وإدارة الأحداث
+ *
+ * ✅ إصلاح: تمت إزالة playAudioSafe المكررة — مستوردة الآن من utils.js
+ */
+
 import { els } from "./dom.js";
 import {
   pageType,
@@ -8,7 +15,7 @@ import {
   getServerNow,
 } from "./state.js";
 import { get, set } from "./firebase.js";
-import { getPlayerJoinUrl, randomCode } from "./utils.js";
+import { getPlayerJoinUrl, randomCode, playAudioSafe } from "./utils.js";
 import {
   readCurrentSession,
   updateSessionPatch,
@@ -23,21 +30,9 @@ import {
 import { showToast } from "./ui-renderer.js";
 import { createOrLoadSession } from "./session-runtime.js";
 
-function playAudioSafe(audioEl) {
-  if (!audioEl) return;
-
-  try {
-    audioEl.pause();
-    audioEl.currentTime = 0;
-
-    const playPromise = audioEl.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {});
-    }
-  } catch (error) {
-    console.error(error);
-  }
-}
+// ─────────────────────────────────────────────
+// Audio Key Builder
+// ─────────────────────────────────────────────
 
 function buildRoundAudioKey(session) {
   return [
@@ -47,6 +42,10 @@ function buildRoundAudioKey(session) {
     Number(session.roundStartedAt || 0),
   ].join(":");
 }
+
+// ─────────────────────────────────────────────
+// Host Settings Sync
+// ─────────────────────────────────────────────
 
 export async function syncHostSettings() {
   if (!local.currentSessionCode) return;
@@ -62,15 +61,20 @@ export async function syncHostSettings() {
       hostUpdatedAt: getServerNow(),
     };
 
+    // لا تُحدَّث timeLeft إذا كان المؤقت يعمل
     if (!session.timerRunning) {
       patch.timeLeft = newMaxTime;
     }
 
     await updateSessionPatch(patch);
   } catch (error) {
-    console.error(error);
+    console.error("syncHostSettings error:", error);
   }
 }
+
+// ─────────────────────────────────────────────
+// Host Heartbeat
+// ─────────────────────────────────────────────
 
 export function stopHostHeartbeat() {
   if (local.hostHeartbeat) {
@@ -96,6 +100,10 @@ export function startHostHeartbeat() {
     }
   }, HOST_HEARTBEAT_MS);
 }
+
+// ─────────────────────────────────────────────
+// Session Cleanup
+// ─────────────────────────────────────────────
 
 export async function cleanupInactiveSession() {
   if (pageType !== "host" || !local.currentSessionCode) return;
@@ -134,9 +142,13 @@ export async function cleanupInactiveSession() {
       showToast("تم حذف الجلسة غير النشطة");
     }
   } catch (error) {
-    console.error(error);
+    console.error("cleanupInactiveSession error:", error);
   }
 }
+
+// ─────────────────────────────────────────────
+// Tick Worker
+// ─────────────────────────────────────────────
 
 export function stopTickWorker() {
   if (local.hostTickWorker) {
@@ -212,12 +224,16 @@ export async function startTickWorker() {
         });
       }
     } catch (error) {
-      console.error(error);
+      console.error("startTickWorker error:", error);
     } finally {
       isTickBusy = false;
     }
   }, 250);
 }
+
+// ─────────────────────────────────────────────
+// Privacy Toggle
+// ─────────────────────────────────────────────
 
 function setSensitiveVisibility(visible) {
   const targets = [els.sessionSensitiveArea, els.sessionQrArea].filter(Boolean);
@@ -259,6 +275,32 @@ function bindSessionPrivacyToggle() {
   });
 }
 
+// ─────────────────────────────────────────────
+// Clipboard Helper
+// ─────────────────────────────────────────────
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  // Fallback للبيئات غير الـ HTTPS
+  const temp = document.createElement("textarea");
+  temp.value = text;
+  temp.style.position = "fixed";
+  temp.style.left = "-9999px";
+  document.body.appendChild(temp);
+  temp.focus();
+  temp.select();
+  document.execCommand("copy");
+  temp.remove();
+}
+
+// ─────────────────────────────────────────────
+// Event Binding
+// ─────────────────────────────────────────────
+
 export function bindHostEvents() {
   bindSessionPrivacyToggle();
 
@@ -267,6 +309,9 @@ export function bindHostEvents() {
       try {
         const newCode = randomCode();
         const readyCode = await createOrLoadSession(newCode);
+
+        // ✅ startHostHeartbeat تُستدعى هنا بدلاً من داخل createOrLoadSession
+        startHostHeartbeat();
 
         const url = new URL(window.location.href);
         url.searchParams.set("session", readyCode);
@@ -282,7 +327,7 @@ export function bindHostEvents() {
 
         showToast("تم إنشاء جلسة جديدة");
       } catch (error) {
-        console.error(error);
+        console.error("createSessionBtn error:", error);
         showToast("تعذر إنشاء جلسة جديدة", true);
       }
     });
@@ -298,23 +343,10 @@ export function bindHostEvents() {
           return;
         }
 
-        if (navigator.clipboard && window.isSecureContext) {
-          await navigator.clipboard.writeText(safeText);
-        } else {
-          const temp = document.createElement("textarea");
-          temp.value = safeText;
-          temp.style.position = "fixed";
-          temp.style.left = "-9999px";
-          document.body.appendChild(temp);
-          temp.focus();
-          temp.select();
-          document.execCommand("copy");
-          temp.remove();
-        }
-
+        await copyTextToClipboard(safeText);
         showToast("تم نسخ الكود");
       } catch (error) {
-        console.error(error);
+        console.error("copyCodeBtn error:", error);
         showToast("تعذر النسخ", true);
       }
     });
@@ -332,23 +364,10 @@ export function bindHostEvents() {
           return;
         }
 
-        if (navigator.clipboard && window.isSecureContext) {
-          await navigator.clipboard.writeText(safeText);
-        } else {
-          const temp = document.createElement("textarea");
-          temp.value = safeText;
-          temp.style.position = "fixed";
-          temp.style.left = "-9999px";
-          document.body.appendChild(temp);
-          temp.focus();
-          temp.select();
-          document.execCommand("copy");
-          temp.remove();
-        }
-
+        await copyTextToClipboard(safeText);
         showToast("تم نسخ رابط الدخول");
       } catch (error) {
-        console.error(error);
+        console.error("copyJoinBtn error:", error);
         showToast("تعذر النسخ", true);
       }
     });
@@ -359,7 +378,7 @@ export function bindHostEvents() {
       try {
         await openAllForPlayers();
       } catch (error) {
-        console.error(error);
+        console.error("openAllBtn error:", error);
         showToast("تعذر فتح الأزرار للجميع", true);
       }
     });
@@ -370,7 +389,7 @@ export function bindHostEvents() {
       try {
         await toggleLock();
       } catch (error) {
-        console.error(error);
+        console.error("toggleLockBtn error:", error);
         showToast("تعذر تغيير حالة القفل", true);
       }
     });
@@ -381,7 +400,7 @@ export function bindHostEvents() {
       try {
         await clearWinner();
       } catch (error) {
-        console.error(error);
+        console.error("clearWinnerBtn error:", error);
         showToast("تعذر مسح الفائز", true);
       }
     });
@@ -392,7 +411,7 @@ export function bindHostEvents() {
       try {
         await addPoint();
       } catch (error) {
-        console.error(error);
+        console.error("addPointBtn error:", error);
         showToast("تعذر إضافة النقطة", true);
       }
     });
@@ -404,7 +423,7 @@ export function bindHostEvents() {
         const autoName = await addTeam();
         showToast(`تمت إضافة ${autoName}`);
       } catch (error) {
-        console.error(error);
+        console.error("addTeamBtn error:", error);
         showToast("تعذر إضافة الفريق", true);
       }
     });

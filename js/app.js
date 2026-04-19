@@ -1,3 +1,14 @@
+/**
+ * app.js
+ * نقطة الدخول الرئيسية — boot sequence وإدارة الأحداث العامة
+ *
+ * ✅ إصلاح: تمت إزالة استدعاء deleteSessionIfExpired المكرر قبل createOrLoadSession
+ *    (كانت تُستدعى مرتين — مرة هنا ومرة داخل createOrLoadSession)
+ *
+ * ✅ إصلاح: startHostHeartbeat تُستدعى هنا بعد createOrLoadSession مباشرة،
+ *    بدلاً من أن تُستدعى من داخل session-runtime.js (كانت سبب الـ circular dependency)
+ */
+
 import { els } from "./dom.js";
 import { pageType, local, getServerNow } from "./state.js";
 import { get } from "./firebase.js";
@@ -12,6 +23,7 @@ import {
 } from "./ui-renderer.js";
 import {
   bindHostEvents,
+  startHostHeartbeat,
   startTickWorker,
   stopHostHeartbeat,
   stopTickWorker,
@@ -23,6 +35,10 @@ import {
   stopPlayerHeartbeat,
 } from "./player-controller.js";
 import { createOrLoadSession, subscribeToSession } from "./session-runtime.js";
+
+// ─────────────────────────────────────────────
+// Home Page Events
+// ─────────────────────────────────────────────
 
 function bindHomeEvents() {
   if (els.createSessionBtn) {
@@ -78,26 +94,26 @@ function bindHomeEvents() {
 
         window.location.href = `player.html?session=${encodeURIComponent(code)}`;
       } catch (error) {
-        console.error(error);
+        console.error("joinSessionBtn error:", error);
         showJoinError("تعذر التحقق من كود الجلسة");
       }
     });
   }
 }
 
+// ─────────────────────────────────────────────
+// Event Binding Router
+// ─────────────────────────────────────────────
+
 function bindEvents() {
-  if (pageType === "home") {
-    bindHomeEvents();
-  }
-
-  if (pageType === "host") {
-    bindHostEvents();
-  }
-
-  if (pageType === "player") {
-    bindPlayerEvents();
-  }
+  if (pageType === "home") bindHomeEvents();
+  if (pageType === "host") bindHostEvents();
+  if (pageType === "player") bindPlayerEvents();
 }
+
+// ─────────────────────────────────────────────
+// Visibility & Unload Events
+// ─────────────────────────────────────────────
 
 function bindVisibilityEvents() {
   document.addEventListener("visibilitychange", async () => {
@@ -119,7 +135,7 @@ function bindVisibilityEvents() {
         await attachPresence(local.currentSessionCode);
       }
     } catch (error) {
-      console.error(error);
+      console.error("visibilitychange error:", error);
     }
   });
 
@@ -130,13 +146,15 @@ function bindVisibilityEvents() {
   });
 }
 
+// ─────────────────────────────────────────────
+// Boot Sequence
+// ─────────────────────────────────────────────
+
 async function boot() {
   bindEvents();
   bindVisibilityEvents();
 
-  if (pageType === "home") {
-    return;
-  }
+  if (pageType === "home") return;
 
   startUiTicker();
 
@@ -148,6 +166,7 @@ async function boot() {
     await startTickWorker();
   }
 
+  // قراءة وتنظيف كود الجلسة من الـ URL
   const queryCode = new URLSearchParams(location.search).get("session");
   const cleanCode = String(queryCode || "")
     .trim()
@@ -158,6 +177,7 @@ async function boot() {
     return;
   }
 
+  // ✅ إصلاح: استدعاء واحد فقط لـ deleteSessionIfExpired (كانت تُستدعى مرتين)
   const wasDeleted = await deleteSessionIfExpired(cleanCode);
 
   if (wasDeleted) {
@@ -167,6 +187,9 @@ async function boot() {
 
   if (pageType === "host") {
     const readyCode = await createOrLoadSession(cleanCode);
+
+    // ✅ إصلاح: startHostHeartbeat هنا بعد إنشاء الجلسة (لا داخل session-runtime)
+    startHostHeartbeat();
 
     const url = new URL(window.location.href);
     url.searchParams.set("session", readyCode);
@@ -196,6 +219,6 @@ async function boot() {
 }
 
 boot().catch((error) => {
-  console.error(error);
+  console.error("boot error:", error);
   showToast("تحقق من إعدادات Firebase أو هيكل الملفات", true);
 });

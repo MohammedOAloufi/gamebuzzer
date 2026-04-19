@@ -221,6 +221,13 @@ function forceReleaseBuzzLock(token) {
 // ─────────────────────────────────────────────
 
 async function handleBuzzInput() {
+  // ─── Guard 0: منع mobile duplicate (touchend + click)
+  // ✅ يجب أن يكون قبل جميع الحارسات الأخرى
+  if (shouldIgnoreDuplicateMobileTrigger()) {
+    local.playerBuzzInFlight = false;  // فك القفل - كانت touchend duplicate
+    return;
+  }
+
   // ─── Guard 1: منع الضغط المتكرر أثناء معالجة طلب سابق ───
   // ✅ إصلاح محسّن: إذا مضت > 3 ثواني، فك القفل وحاول مجدداً
   if (local.playerBuzzInFlight) {
@@ -292,6 +299,8 @@ async function handleBuzzInput() {
 
     if (!ok) {
       local.playerAttemptRoundId = null;
+      // ✅ أيضاً أعد ضبط debounce حتى الضغطة التالية تعمل
+      local.lastPressTriggerAt = 0;
 
       // عرض رسالة الرفض من البيانات المحلية — بدون await للسرعة
       // ملاحظة: onValue يتكفل بتحديث lastSession تلقائياً — لا حاجة لـ get يدوي
@@ -325,6 +334,8 @@ async function handleBuzzInput() {
   } catch (error) {
     console.error("handleBuzzInput error:", error);
     local.playerAttemptRoundId = null;
+    // ✅ أعد ضبط debounce عند الخطأ أيضاً
+    local.lastPressTriggerAt = 0;
     showToast("تعذر إرسال الضغط", true);
   } finally {
     // يفك القفل فقط إذا كان هذا الطلب هو صاحب القفل الحالي
@@ -354,15 +365,19 @@ function shouldIgnoreDuplicateMobileTrigger() {
   // 0 يعني تمت إعادة الضبط (من forceReleaseBuzzLock أو clearPlayerRoundState)
   // → الضغطة هذه حقيقية ويجب تنفيذها فوراً
   if (local.lastPressTriggerAt === 0) {
+    // ✅ تُضبط هنا عند أول ضغطة فقط
     local.lastPressTriggerAt = now;
     return false;
   }
 
   if (delta < 1000) {
     // ضغطة مكررة من نفس اللمسة (touchend + click)
+    // ✅ **لا** نُعدّل lastPressTriggerAt - نحتفظ بالقيمة القديمة
     return true;
   }
 
+  // ضغطة حقيقية جديدة (بعد >1000ms من آخر ضغطة)
+  // ✅ نُحدّث lastPressTriggerAt فقط عند قبول الضغطة
   local.lastPressTriggerAt = now;
   return false;
 }
@@ -386,15 +401,17 @@ function bindBuzzButtonEvents() {
       return;
     }
 
-    if (shouldIgnoreDuplicateMobileTrigger()) return;
-    
     // ✅ ضبط الـ flag فوراً قبل await
     local.playerBuzzInFlight = true;
     
     try {
       await handleBuzzInput();
-    } finally {
-      // لا نفك هنا - handleBuzzInput تفك عن طريق finally الخاصة بها
+    } catch (error) {
+      // ✅ إذا حدث خطأ، فك القفل فوراً
+      console.error("buzz handler error:", error);
+      local.playerBuzzInFlight = false;
+      local.lastPressTriggerAt = 0;  // أعد تعيين debounce
+      throw error;
     }
   };
 

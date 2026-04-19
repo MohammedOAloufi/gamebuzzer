@@ -230,6 +230,7 @@ function clearPlayerRoundState() {
   }
 
   clearBuzzButtonDomLock();
+  console.log("✅ clearPlayerRoundState: buzz lock released");
 }
 
 function resetPlayerBuzzUiState(session) {
@@ -241,11 +242,13 @@ function resetPlayerBuzzUiState(session) {
     Number(local.lastSeenForceUnlockToken || 0);
 
   if (forceUnlockChanged) {
+    console.log(`resetPlayerBuzzUiState: forceUnlockToken changed, clearing state`);
     local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
     clearPlayerRoundState();
   }
 
   if (local.playerUiRoundId !== currentRoundId) {
+    console.log(`resetPlayerBuzzUiState: round changed (${local.playerUiRoundId} → ${currentRoundId}), clearing state`);
     local.playerUiRoundId = currentRoundId;
     clearPlayerRoundState();
   }
@@ -672,6 +675,7 @@ export function renderPlayerTeam(session) {
 export function renderSession(session) {
   // ✅ إصلاح Bug 6 (المستوى 3): تنظيف حالة اللاعب عند تغيير الجولة
   clearPlayerRoundStateGuard(session.roundId);
+  resetPlayerBuzzUiState(session);
 
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
@@ -772,8 +776,6 @@ export function renderSession(session) {
   ) {
     els.cooldownSelector.value = String(session.cooldown ?? 0);
   }
-
-  resetPlayerBuzzUiState(session);
 
   // ✅ Safety Valve: لو playerBuzzInFlight=true لفترة أطول من الـ timeout + هامش أمان،
   // يعني الـ timeout لم يُشغَّل لسبب ما (tab كان في الخلفية مثلاً) — نفك القفل بالقوة

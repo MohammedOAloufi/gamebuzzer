@@ -131,10 +131,11 @@ function hasConfirmedAttemptThisRound() {
  */
 export function clearPlayerRoundState(newRoundId) {
   const previousRoundId = getCurrentRoundIdFromLocalSession();
+  const normalizedNewRound = Number(newRoundId);
 
-  if (previousRoundId !== Number(newRoundId)) {
+  if (previousRoundId !== normalizedNewRound) {
     console.log(
-      `clearPlayerRoundState: clearing old round (${previousRoundId}) for new round (${newRoundId})`
+      `clearPlayerRoundState: clearing old round (${previousRoundId}) for new round (${normalizedNewRound})`
     );
 
     // مسح تسجيل الضغطة من الجولة القديمة
@@ -149,6 +150,9 @@ export function clearPlayerRoundState(newRoundId) {
 
     // مسح debounce window لضمان الاستجابة الفورية في الجولة الجديدة
     local.lastPressTriggerAt = 0;
+    
+    // ✅ مسح buzzStartedAt لتجنب تفعيل safety valve من جولة قديمة
+    local.buzzStartedAt = 0;
   }
 }
 

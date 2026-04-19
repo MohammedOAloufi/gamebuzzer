@@ -202,6 +202,9 @@ function clearPlayerRoundState() {
   local.playerBuzzInFlight = false;
   local.playerAttemptRoundId = null;
 
+  // إعادة ضبط الـ debounce حتى أول ضغطة بعد فتح الجولة لا تتجاهل
+  local.lastPressTriggerAt = 0;
+
   // إلغاء الـ timer الأمان حتى لا يتدخل بطلب جديد
   if (local.buzzInflightTimer) {
     clearTimeout(local.buzzInflightTimer);

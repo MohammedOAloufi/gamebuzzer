@@ -7,6 +7,7 @@ import {
   getCurrentPlayerName,
   getSelectedTeamId,
   normalizeSession,
+  readCurrentSession,
   refreshSessionExpiry,
   presenceRef,
   sessionRef,
@@ -120,7 +121,7 @@ async function handleBuzzInput() {
 
   try {
     const currentRoundId = getCurrentRoundIdFromLocalSession();
-    const ok = await claimBuzz(fixedTeamId, fixedPlayerName);
+    const ok = await claimBuzz(fixedTeamId, fixedPlayerName, currentRoundId);
 
     if (!ok) {
       local.playerAttemptRoundId = null;

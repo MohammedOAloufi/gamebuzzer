@@ -439,7 +439,7 @@ export async function registerPress(teamId, playerName = "") {
   return true;
 }
 
-export async function claimBuzz(teamId, playerName = "") {
+export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
   if (!local.currentSessionCode) return false;
 
   const safePlayerName = sanitizeName(playerName) || "لاعب";
@@ -467,6 +467,16 @@ export async function claimBuzz(teamId, playerName = "") {
           ? null
           : Number(current.cooldownTeamId);
       const cooldownEndsAt = current.cooldownEndsAt ?? null;
+
+      // الحماية الأساسية: لو تغيرت الجولة منذ بدأنا الطلب نلغي التراكنزاكشن
+      // هذا يمنع الـ retry التلقائي من Firebase من الضغط في جولة جديدة بالغلط
+      if (
+        expectedRoundId !== undefined &&
+        Number.isFinite(expectedRoundId) &&
+        roundId !== expectedRoundId
+      ) {
+        return;
+      }
 
       const myTeamCooldownActive =
         cooldownTeamId !== null &&

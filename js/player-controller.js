@@ -1,6 +1,6 @@
 import { els } from "./dom.js";
 import { pageType, local, PLAYER_HEARTBEAT_MS, getServerNow } from "./state.js";
-import { onDisconnect, set, update } from "./firebase.js";
+import { onDisconnect, set, update, get } from "./firebase.js";
 import {
   claimBuzz,
   getBuzzBlockReason,
@@ -126,20 +126,27 @@ async function handleBuzzInput() {
     if (!ok) {
       local.playerAttemptRoundId = null;
 
-      // نقرأ السبب من الجلسة المحلية مباشرة — بدون طلب Firebase إضافي
-      // لتجنب race condition بين الطلب القديم والطلب الجديد
-      const localSession = local.lastSession
-        ? normalizeSession(local.lastSession, local.currentSessionCode)
-        : null;
+      // المشكلة الأساسية: local.lastSession قد يكون قديماً (الـ onValue لم يصل بعد)
+      // الـ UI ticker يشتغل كل 100ms ويعطّل الزر بناءً على البيانات القديمة
+      // الحل: نجيب البيانات الجديدة من Firebase مباشرة ونحدّث local.lastSession
+      try {
+        const freshSnap = await get(sessionRef(local.currentSessionCode));
 
-      const localReason = localSession
-        ? getBuzzBlockReason(localSession, { strict: true })
-        : null;
+        if (freshSnap.exists()) {
+          local.lastSession = freshSnap.val();
+          const freshSession = normalizeSession(
+            freshSnap.val(),
+            local.currentSessionCode,
+          );
+          const freshReason = getBuzzBlockReason(freshSession, { strict: true });
+          showToast(getBuzzRejectMessage(freshReason || "another_player_won"), true);
+        } else {
+          showToast("سبقك لاعب", true);
+        }
+      } catch {
+        showToast("سبقك لاعب", true);
+      }
 
-      showToast(
-        getBuzzRejectMessage(localReason || "another_player_won"),
-        true,
-      );
       return;
     }
 

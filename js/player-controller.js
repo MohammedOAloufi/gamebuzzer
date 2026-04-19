@@ -7,7 +7,6 @@ import {
   getCurrentPlayerName,
   getSelectedTeamId,
   normalizeSession,
-  readCurrentSession,
   refreshSessionExpiry,
   presenceRef,
   sessionRef,
@@ -79,11 +78,6 @@ function forceReleaseBuzzLock(token) {
   }
 
   clearBuzzButtonDomLock();
-}
-
-async function getAccurateBuzzBlockReason() {
-  const session = await readCurrentSession();
-  return getBuzzBlockReason(session, { strict: true });
 }
 
 async function handleBuzzInput() {

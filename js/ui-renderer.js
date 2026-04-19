@@ -197,8 +197,17 @@ function syncHostSounds(session, displayTimeRaw = null) {
 }
 
 function clearPlayerRoundState() {
+  // رفع الـ token يلغي أي finally قديم معلق من handleBuzzInput
+  local.buzzToken = (local.buzzToken || 0) + 1;
   local.playerBuzzInFlight = false;
   local.playerAttemptRoundId = null;
+
+  // إلغاء الـ timer الأمان حتى لا يتدخل بطلب جديد
+  if (local.buzzInflightTimer) {
+    clearTimeout(local.buzzInflightTimer);
+    local.buzzInflightTimer = null;
+  }
+
   clearBuzzButtonDomLock();
 }
 

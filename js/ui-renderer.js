@@ -218,6 +218,9 @@ function clearPlayerRoundState() {
   // إعادة ضبط الـ debounce حتى أول ضغطة بعد فتح الجولة لا تتجاهل
   local.lastPressTriggerAt = 0;
 
+  // ✅ إصلاح: إعادة ضبط وقت البدء حتى لا يُشغّل الـ safety valve خطأً
+  local.buzzStartedAt = 0;
+
   // إلغاء الـ timer الأمان حتى لا يتدخل بطلب جديد
   if (local.buzzInflightTimer) {
     clearTimeout(local.buzzInflightTimer);
@@ -766,6 +769,25 @@ export function renderSession(session) {
   }
 
   resetPlayerBuzzUiState(session);
+
+  // ✅ Safety Valve: لو playerBuzzInFlight=true لفترة أطول من الـ timeout + هامش أمان،
+  // يعني الـ timeout لم يُشغَّل لسبب ما (tab كان في الخلفية مثلاً) — نفك القفل بالقوة
+  if (
+    local.playerBuzzInFlight &&
+    local.buzzStartedAt > 0 &&
+    Date.now() - local.buzzStartedAt > (2000 + 500)  // BUZZ_INFLIGHT_TIMEOUT_MS + 500ms هامش
+  ) {
+    console.warn("renderSession: stale buzz lock detected — force releasing");
+    local.buzzToken = (local.buzzToken || 0) + 1;
+    local.playerBuzzInFlight = false;
+    local.buzzStartedAt = 0;
+    local.lastPressTriggerAt = 0;
+    if (local.buzzInflightTimer) {
+      clearTimeout(local.buzzInflightTimer);
+      local.buzzInflightTimer = null;
+    }
+    clearBuzzButtonDomLock();
+  }
 
   if (els.deviceBuzzBtn) {
     const playerBlockedReason = getBuzzBlockReason(session, { strict: true });

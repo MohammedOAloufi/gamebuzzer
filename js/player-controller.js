@@ -126,25 +126,23 @@ async function handleBuzzInput() {
     if (!ok) {
       local.playerAttemptRoundId = null;
 
-      // المشكلة الأساسية: local.lastSession قد يكون قديماً (الـ onValue لم يصل بعد)
-      // الـ UI ticker يشتغل كل 100ms ويعطّل الزر بناءً على البيانات القديمة
-      // الحل: نجيب البيانات الجديدة من Firebase مباشرة ونحدّث local.lastSession
-      try {
-        const freshSnap = await get(sessionRef(local.currentSessionCode));
+      // عرض الرسالة فوراً من البيانات المحلية — بدون أي await
+      const localSession = local.lastSession
+        ? normalizeSession(local.lastSession, local.currentSessionCode)
+        : null;
+      const localReason = localSession
+        ? getBuzzBlockReason(localSession, { strict: true })
+        : null;
+      showToast(getBuzzRejectMessage(localReason || "another_player_won"), true);
 
-        if (freshSnap.exists()) {
-          local.lastSession = freshSnap.val();
-          const freshSession = normalizeSession(
-            freshSnap.val(),
-            local.currentSessionCode,
-          );
-          const freshReason = getBuzzBlockReason(freshSession, { strict: true });
-          showToast(getBuzzRejectMessage(freshReason || "another_player_won"), true);
-        } else {
-          showToast("سبقك لاعب", true);
-        }
-      } catch {
-        showToast("سبقك لاعب", true);
+      // تحديث local.lastSession في الخلفية — بدون await حتى يشتغل finally فوراً
+      // هذا يصلح حالة الزر في الدورة التالية (100ms) بدل ما يبقى معلق
+      if (local.currentSessionCode) {
+        get(sessionRef(local.currentSessionCode))
+          .then((snap) => {
+            if (snap.exists()) local.lastSession = snap.val();
+          })
+          .catch(() => {});
       }
 
       return;

@@ -5,6 +5,8 @@
  * ✅ إصلاح 1: progressBar — كلاس "expired" يُضاف الآن بشكل صحيح عند انتهاء الوقت
  * ✅ إصلاح 2: تمت إزالة playAudioSafe المكررة — مستوردة من utils.js
  * ✅ إصلاح 3: startUiTicker تحفظ الآن reference للـ interval في local
+ * ✅ إصلاح 6: استدعاء clearPlayerRoundStateGuard و resetBuzzLockIfStale في renderSession
+ *             لفك القفل تلقائياً ومسح الحالة عند تغيير الجولة
  */
 
 import { els } from "./dom.js";
@@ -23,7 +25,7 @@ import {
   changeTeamPoints,
   updateTeamName,
 } from "./session-service.js";
-import { clearBuzzButtonDomLock } from "./player-controller.js";
+import { clearBuzzButtonDomLock, resetBuzzLockIfStale, clearPlayerRoundState as clearPlayerRoundStateGuard } from "./player-controller.js";
 
 // ─────────────────────────────────────────────
 // Countdown Audio Pool
@@ -668,6 +670,13 @@ export function renderPlayerTeam(session) {
 // ─────────────────────────────────────────────
 
 export function renderSession(session) {
+  // ✅ إصلاح Bug 6 (المستوى 3): تنظيف حالة اللاعب عند تغيير الجولة
+  clearPlayerRoundStateGuard(session.roundId);
+
+  // ✅ إصلاح Bug 6 (المستوى 1): فك القفل تلقائياً إذا أصبح الـ buzz معلقاً غير مطلوب
+  // (مثلاً بسبب تغيير الجولة أو مرور وقت طويل)
+  resetBuzzLockIfStale(session);
+
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
   if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;

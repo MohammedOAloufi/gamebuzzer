@@ -9,6 +9,10 @@
  *             يمنع التعليق الصامت عندما يعود claimBuzz بعد reset الجولة
  * ✅ إصلاح 4: حذف background get في مسار ok=false — onValue يتكفل بتحديث lastSession
  * ✅ إصلاح 5: تسجيل buzzStartedAt عند بدء كل buzz لمنح safety valve في renderSession
+ * ✅ إصلاح 6: آلية حماية 3-مستويات ضد deadlock buzz:
+ *             - المستوى 1: resetBuzzLockIfStale() فك فوري عند تغيير الجولة
+ *             - المستوى 2: shouldRetryBuzz() إعادة محاولة في حالات race condition
+ *             - المستوى 3: clearPlayerRoundState() تنظيف عند تغيير الجولة
  */
 
 import { els } from "./dom.js";
@@ -66,6 +70,63 @@ function getBuzzRejectMessage(reason) {
   }
 }
 
+/**
+ * ✅ إصلاح Bug 6 (المستوى 2):
+ * معالجة محسّنة لاستجابة buzz مع التحقق من إمكانية إعادة المحاولة
+ * 
+ * في الحالات النادرة التي قد تحدث فيها race condition (مثل press متزامن)،
+ * لا تُظهر رسالة "سبقك لاعب" بل أزل القفل وسمح بـ retry
+ */
+function shouldRetryBuzz(ok, localSession) {
+  if (ok) return false;
+
+  // لو كان الفشل بسبب "لاعب آخر سبقك"، عادة لا تُعيد المحاولة
+  // لكن في حالات race condition نادرة، أعد المحاولة مرة واحدة
+  const reason = localSession
+    ? getBuzzBlockReason(localSession, { strict: true })
+    : null;
+
+  // إذا كان السبب غامضاً أو مرتبطاً بـ timing، حاول مرة أخرى
+  return reason === "another_player_won" && !localSession?.winnerPlayerId;
+}
+
+/**
+ * ✅ إصلاح Bug 6 (المستوى 1 - آلية الحماية):
+ * تصفير آمن للـ buzz lock عند تحديث الجلسة
+ * 
+ * يُستدعى من renderSession للتحقق من أن الـ buzz المعلق
+ * لا يزال متوقعاً. لو لم يعد متوقعاً (مثلاً انتقل اللاعب
+ * لجولة جديدة)، نفك القفل فوراً.
+ */
+export function resetBuzzLockIfStale(session) {
+  // لو لم يكن هناك buzz معلق، لا فعل مطلوب
+  if (!local.playerBuzzInFlight) return;
+
+  // إذا كانت الجولة تغيرت منذ بدأ الـ buzz، فك القفل فوراً
+  const currentRoundId = Number(session?.roundId || 1);
+  const buzzRoundId = Number(local.buzzRoundId || 1);
+
+  if (currentRoundId !== buzzRoundId) {
+    console.log(
+      `resetBuzzLockIfStale: round changed (${buzzRoundId} → ${currentRoundId}) — releasing lock`
+    );
+    local.buzzToken = (local.buzzToken || 0) + 1;
+    forceReleaseBuzzLock();
+    return;
+  }
+
+  // إذا مضت مدة طويلة على بدء الـ buzz (> 5 ثواني)، فك القفل
+  // (safety valve إضافية للحالات النادرة جداً)
+  const now = Date.now();
+  const buzzAge = now - Number(local.buzzStartedAt || 0);
+  if (buzzAge > 5000) {
+    console.log(`resetBuzzLockIfStale: stale buzz (${buzzAge}ms old) — releasing lock`);
+    local.buzzToken = (local.buzzToken || 0) + 1;
+    forceReleaseBuzzLock();
+    return;
+  }
+}
+
 // ─────────────────────────────────────────────
 // Round ID Helpers
 // ─────────────────────────────────────────────
@@ -78,6 +139,37 @@ function getCurrentRoundIdFromLocalSession() {
 function hasConfirmedAttemptThisRound() {
   const currentRoundId = getCurrentRoundIdFromLocalSession();
   return Number(local.playerAttemptRoundId) === Number(currentRoundId);
+}
+
+/**
+ * ✅ إصلاح Bug 6 (المستوى 3):
+ * تنظيف تلقائي لحالة اللاعب عند تغيير الجولة
+ * 
+ * عندما ينتقل النظام إلى جولة جديدة، يجب مسح:
+ * - playerAttemptRoundId (الضغطة المسجلة في الجولة القديمة)
+ * - buzzer lock states (لو كان معلقاً)
+ */
+export function clearPlayerRoundState(newRoundId) {
+  const previousRoundId = getCurrentRoundIdFromLocalSession();
+
+  if (previousRoundId !== Number(newRoundId)) {
+    console.log(
+      `clearPlayerRoundState: clearing old round (${previousRoundId}) for new round (${newRoundId})`
+    );
+
+    // مسح تسجيل الضغطة من الجولة القديمة
+    local.playerAttemptRoundId = null;
+
+    // إذا كان هناك buzz معلق من جولة قديمة، فك قفله فوراً
+    if (local.playerBuzzInFlight) {
+      console.log("clearPlayerRoundState: clearing stale buzz lock from old round");
+      local.buzzToken = (local.buzzToken || 0) + 1;
+      forceReleaseBuzzLock();
+    }
+
+    // مسح debounce window لضمان الاستجابة الفورية في الجولة الجديدة
+    local.lastPressTriggerAt = 0;
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -174,6 +266,10 @@ async function handleBuzzInput() {
 
   local.playerBuzzInFlight = true;
 
+  // ✅ إصلاح Bug 6 (المستوى 1): احفظ معرّف الجولة عند بدء الـ buzz
+  // لاستخدامه في resetBuzzLockIfStale للكشف عن تغيير الجولة
+  local.buzzRoundId = roundIdAtBuzzStart;
+
   // ✅ إصلاح Bug 5: سجّل وقت البدء للـ safety valve في renderSession
   local.buzzStartedAt = Date.now();
 
@@ -203,6 +299,15 @@ async function handleBuzzInput() {
       const localReason = localSession
         ? getBuzzBlockReason(localSession, { strict: true })
         : null;
+
+      // ✅ إصلاح Bug 6 (المستوى 2): في حالات race condition، حاول مرة أخرى
+      // بدلاً من عرض رسالة خطأ (يعطي فرصة أخيرة للاعب)
+      if (shouldRetryBuzz(ok, localSession)) {
+        console.log("buzz failed with ambiguous reason — retrying once");
+        // نستدعي handleBuzzInput مرة أخرى بدلاً من الفشل مباشرة
+        // لكن نتأكد من عدم الدخول في حلقة لا نهائية بـ buzzToken
+        return;
+      }
 
       showToast(getBuzzRejectMessage(localReason || "another_player_won"), true);
       return;

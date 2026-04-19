@@ -375,6 +375,12 @@ function bindBuzzButtonEvents() {
       event.stopPropagation();
     }
 
+    // ✅ إضافة guard سريعة: منع spam متتالي
+    if (local.playerBuzzInFlight) {
+      console.warn(`bindBuzzButtonEvents: buzz already in flight — ignoring`);
+      return;
+    }
+
     if (shouldIgnoreDuplicateMobileTrigger()) return;
     await handleBuzzInput();
   };

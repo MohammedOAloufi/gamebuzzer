@@ -479,95 +479,103 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 
   const attemptTime = getServerNow();
 
-  const result = await runTransaction(
-    sessionRef(local.currentSessionCode),
-    (current) => {
-      if (!current) return current;
+  try {
+    const result = await runTransaction(
+      sessionRef(local.currentSessionCode),
+      (current) => {
+        if (!current) return current;
 
-      const currentWinner =
-        current.winnerTeamId === null || current.winnerTeamId === undefined
-          ? null
-          : Number(current.winnerTeamId);
+        const currentWinner =
+          current.winnerTeamId === null || current.winnerTeamId === undefined
+            ? null
+            : Number(current.winnerTeamId);
 
-      const locked = Boolean(current.locked);
-      const answerExpired = Boolean(current.answerExpired);
-      const roundId = Number(current.roundId || 1);
-      const cooldownTeamId =
-        current.cooldownTeamId === null || current.cooldownTeamId === undefined
-          ? null
-          : Number(current.cooldownTeamId);
-      const cooldownEndsAt = current.cooldownEndsAt ?? null;
+        const locked = Boolean(current.locked);
+        const answerExpired = Boolean(current.answerExpired);
+        const roundId = Number(current.roundId || 1);
+        const cooldownTeamId =
+          current.cooldownTeamId === null || current.cooldownTeamId === undefined
+            ? null
+            : Number(current.cooldownTeamId);
+        const cooldownEndsAt = current.cooldownEndsAt ?? null;
 
-      // الحماية الأساسية: لو تغيرت الجولة منذ بدأنا الطلب نلغي التراكنزاكشن
-      if (
-        expectedRoundId !== undefined &&
-        Number.isFinite(expectedRoundId) &&
-        roundId !== expectedRoundId
-      ) {
-        return;
-      }
+        // الحماية الأساسية: لو تغيرت الجولة منذ بدأنا الطلب نلغي التراكنزاكشن
+        if (
+          expectedRoundId !== undefined &&
+          Number.isFinite(expectedRoundId) &&
+          roundId !== expectedRoundId
+        ) {
+          return;
+        }
 
-      const myTeamCooldownActive =
-        cooldownTeamId !== null &&
-        cooldownTeamId === teamIdNum &&
-        Boolean(cooldownEndsAt) &&
-        attemptTime < Number(cooldownEndsAt);
+        const myTeamCooldownActive =
+          cooldownTeamId !== null &&
+          cooldownTeamId === teamIdNum &&
+          Boolean(cooldownEndsAt) &&
+          attemptTime < Number(cooldownEndsAt);
 
-      const currentPresses =
-        current.presses && typeof current.presses === "object"
-          ? current.presses
-          : {};
-      const myCurrentPress = currentPresses[local.deviceId];
-      const alreadyPressedThisRound =
-        myCurrentPress &&
-        Number(myCurrentPress.roundId || 0) === Number(roundId);
+        const currentPresses =
+          current.presses && typeof current.presses === "object"
+            ? current.presses
+            : {};
+        const myCurrentPress = currentPresses[local.deviceId];
+        const alreadyPressedThisRound =
+          myCurrentPress &&
+          Number(myCurrentPress.roundId || 0) === Number(roundId);
 
-      if (
-        locked ||
-        (currentWinner !== null && !answerExpired) ||
-        myTeamCooldownActive ||
-        alreadyPressedThisRound
-      ) {
-        return;
-      }
+        if (
+          locked ||
+          (currentWinner !== null && !answerExpired) ||
+          myTeamCooldownActive ||
+          alreadyPressedThisRound
+        ) {
+          return;
+        }
 
-      const maxTime = Number(current.maxTime || 3);
-      const nextPresses = { ...currentPresses };
+        const maxTime = Number(current.maxTime || 3);
+        const nextPresses = { ...currentPresses };
 
-      nextPresses[local.deviceId] = {
-        teamId: teamIdNum,
-        playerName: safePlayerName,
-        pressedAt: attemptTime,
-        roundId,
-      };
+        nextPresses[local.deviceId] = {
+          teamId: teamIdNum,
+          playerName: safePlayerName,
+          pressedAt: attemptTime,
+          roundId,
+        };
 
-      return {
-        ...current,
-        winnerTeamId: teamIdNum,
-        winnerPlayerName: safePlayerName,
-        winnerPlayerId: local.deviceId,
-        winnerPressedAt: attemptTime,
-        locked: true,
-        timerRunning: true,
-        answerExpired: false,
-        roundStartedAt: attemptTime,
-        roundEndsAt: attemptTime + maxTime * 1000,
-        timeLeft: maxTime,
-        cooldownPlayerId: "",
-        cooldownTeamId: null,
-        cooldownEndsAt: null,
-        updatedAt: attemptTime,
-        hostUpdatedAt: attemptTime,
-        expiresAt: attemptTime + SESSION_EXPIRY_MS,
-        presses: nextPresses,
-      };
-    },
-    {
-      applyLocally: false,
-    },
-  );
+        return {
+          ...current,
+          winnerTeamId: teamIdNum,
+          winnerPlayerName: safePlayerName,
+          winnerPlayerId: local.deviceId,
+          winnerPressedAt: attemptTime,
+          locked: true,
+          timerRunning: true,
+          answerExpired: false,
+          roundStartedAt: attemptTime,
+          roundEndsAt: attemptTime + maxTime * 1000,
+          timeLeft: maxTime,
+          cooldownPlayerId: "",
+          cooldownTeamId: null,
+          cooldownEndsAt: null,
+          updatedAt: attemptTime,
+          hostUpdatedAt: attemptTime,
+          expiresAt: attemptTime + SESSION_EXPIRY_MS,
+          presses: nextPresses,
+        };
+      },
+      {
+        applyLocally: false,
+      },
+    );
 
-  return result.committed === true;
+    return result.committed === true;
+  } catch (error) {
+    // Firebase يرمي خطأ في حالات: تعارض الشبكة، timeout، أو تعارض transactions متزامنة
+    // هذا سلوك طبيعي عند ضغط لاعبين في نفس الوقت — نُعيد false بدل رمي الخطأ
+    // حتى لا تظهر رسالة "تعذر إرسال الضغط" المربكة للمستخدم
+    console.warn("claimBuzz: transaction error (treating as ok=false):", error?.message ?? error);
+    return false;
+  }
 }
 
 export async function addPoint() {

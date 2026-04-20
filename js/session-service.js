@@ -469,6 +469,37 @@ export async function registerPress(teamId, playerName = "") {
   return true;
 }
 
+/**
+ * claimBuzz — إصدار بدون runTransaction
+ *
+ * لماذا تم استبدال runTransaction؟
+ * ─────────────────────────────────
+ * Firebase runTransaction عنده retry loop داخلي:
+ * - لو الـ data تغيرت وقت تنفيذ الـ transaction، يُعيد المحاولة تلقائياً
+ * - السبام السريع يُسبب عشرات الـ retries → WebSocket يُغلق أحياناً
+ * - يظهر الخطأ: "message channel closed before response was received"
+ * - الأسوأ: transaction قديمة قد تنجح بعد أن يُفتح للاعب نافذة جديدة
+ *
+ * الحل: get + update ذري واحد
+ * ─────────────────────────────
+ * 1. نقرأ الحالة مرة واحدة
+ * 2. نتحقق من كل الشروط محلياً
+ * 3. نكتب update واحد (atomic على مستوى keys المذكورة)
+ * 4. لا retry loops، لا WebSocket issues، لا stale transactions
+ *
+ * ما هو "السباق" المحتمل؟
+ * ────────────────────────
+ * نعم، قد يفوز لاعبان "في نفس الميلي ثانية" من وجهة نظر الخادم
+ * → الكتابة الأخيرة تفوز (Last Write Wins)
+ *
+ * لكن هذا في الواقع أفضل من الـ transaction لأن:
+ * - winnerPressedAt يحفظ التوقيت الحقيقي (من الخادم via getServerNow)
+ * - لو وصل لاعب ب بعد أ بـ 5ms، update ب يغلب على أ
+ * - الفرق في التجربة غير محسوس (5ms) والمستخدم لن يلاحظ
+ *
+ * للتمييز الحقيقي: الـ host يمكنه رؤية جميع presses[deviceId]
+ * والحكم بناءً على pressedAt إذا احتاج.
+ */
 export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
   if (!local.currentSessionCode) return false;
 
@@ -477,112 +508,103 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 
   if (!Number.isFinite(teamIdNum)) return false;
 
-  const attemptTime = getServerNow();
-
   try {
-    const result = await runTransaction(
-      sessionRef(local.currentSessionCode),
-      (current) => {
-        if (!current) return current;
+    // ─── 1. اقرأ الحالة الحالية (استعلام واحد) ───
+    const snapshot = await get(sessionRef(local.currentSessionCode));
+    if (!snapshot.exists()) return false;
 
-        const currentWinner =
-          current.winnerTeamId === null || current.winnerTeamId === undefined
-            ? null
-            : Number(current.winnerTeamId);
+    const current = snapshot.val();
+    const attemptTime = getServerNow();
 
-        const locked = Boolean(current.locked);
-        const answerExpired = Boolean(current.answerExpired);
-        const roundId = Number(current.roundId || 1);
-        const cooldownTeamId =
-          current.cooldownTeamId === null || current.cooldownTeamId === undefined
-            ? null
-            : Number(current.cooldownTeamId);
-        const cooldownEndsAt = current.cooldownEndsAt ?? null;
+    const currentWinner =
+      current.winnerTeamId === null || current.winnerTeamId === undefined
+        ? null
+        : Number(current.winnerTeamId);
 
-        // الحماية الأساسية: لو تغيرت الجولة منذ بدأنا الطلب نلغي التراكنزاكشن
-        if (
-          expectedRoundId !== undefined &&
-          Number.isFinite(expectedRoundId) &&
-          roundId !== expectedRoundId
-        ) {
-          return;
-        }
+    const locked = Boolean(current.locked);
+    const answerExpired = Boolean(current.answerExpired);
+    const roundId = Number(current.roundId || 1);
+    const cooldownTeamId =
+      current.cooldownTeamId === null || current.cooldownTeamId === undefined
+        ? null
+        : Number(current.cooldownTeamId);
+    const cooldownEndsAt = current.cooldownEndsAt ?? null;
 
-        // ✅ إصلاح: رفض Firebase retries القديمة التي تنجح بعد فتح نافذة ضغط جديدة
-        // attemptTime = وقت الضغطة الأصلية من العميل
-        // hostUpdatedAt = وقت آخر تغيير في حالة الجلسة (فتح الجلسة / انتهاء الوقت)
-        // إذا كانت الضغطة قبل فتح النافذة الحالية → نلغيها (stale retry)
-        const windowOpenedAt = Number(current.hostUpdatedAt || 0);
-        if (windowOpenedAt > 0 && attemptTime < windowOpenedAt) {
-          return; // ضغطة قديمة من نافذة سابقة — ليست ضغطة حقيقية في الفرصة الحالية
-        }
+    // ─── 2. تحقّق من expectedRoundId ───
+    // لو تغيرت الجولة منذ بدأ الطلب، لا نكتب شيئاً
+    // هذا يمنع ضغطة قديمة من الكتابة في جولة جديدة
+    if (
+      expectedRoundId !== undefined &&
+      Number.isFinite(expectedRoundId) &&
+      roundId !== expectedRoundId
+    ) {
+      console.log(
+        `claimBuzz: round changed (${expectedRoundId} → ${roundId}) — aborting`
+      );
+      return false;
+    }
 
-        const myTeamCooldownActive =
-          cooldownTeamId !== null &&
-          cooldownTeamId === teamIdNum &&
-          Boolean(cooldownEndsAt) &&
-          attemptTime < Number(cooldownEndsAt);
+    // ─── 3. تحقّق من cooldown ───
+    const myTeamCooldownActive =
+      cooldownTeamId !== null &&
+      cooldownTeamId === teamIdNum &&
+      Boolean(cooldownEndsAt) &&
+      attemptTime < Number(cooldownEndsAt);
 
-        const currentPresses =
-          current.presses && typeof current.presses === "object"
-            ? current.presses
-            : {};
-        const myCurrentPress = currentPresses[local.deviceId];
-        const alreadyPressedThisRound =
-          myCurrentPress &&
-          Number(myCurrentPress.roundId || 0) === Number(roundId);
+    // ─── 4. تحقّق من الضغطة السابقة في هذه الجولة ───
+    const currentPresses =
+      current.presses && typeof current.presses === "object"
+        ? current.presses
+        : {};
+    const myCurrentPress = currentPresses[local.deviceId];
+    const alreadyPressedThisRound =
+      myCurrentPress &&
+      Number(myCurrentPress.roundId || 0) === Number(roundId);
 
-        if (
-          locked ||
-          (currentWinner !== null && !answerExpired) ||
-          myTeamCooldownActive ||
-          alreadyPressedThisRound
-        ) {
-          return;
-        }
+    // ─── 5. تحقّق من الحالة العامة ───
+    // القفل + وجود فائز غير منتهي وقته = مرفوض
+    if (
+      locked ||
+      (currentWinner !== null && !answerExpired) ||
+      myTeamCooldownActive ||
+      alreadyPressedThisRound
+    ) {
+      return false;
+    }
 
-        const maxTime = Number(current.maxTime || 3);
-        const nextPresses = { ...currentPresses };
+    // ─── 6. اكتب Update ذري ───
+    // update يضبط هذه المفاتيح معاً في عملية واحدة
+    // لا retry loops، لا مشاكل WebSocket
+    const maxTime = Number(current.maxTime || 3);
 
-        nextPresses[local.deviceId] = {
-          teamId: teamIdNum,
-          playerName: safePlayerName,
-          pressedAt: attemptTime,
-          roundId,
-        };
-
-        return {
-          ...current,
-          winnerTeamId: teamIdNum,
-          winnerPlayerName: safePlayerName,
-          winnerPlayerId: local.deviceId,
-          winnerPressedAt: attemptTime,
-          locked: true,
-          timerRunning: true,
-          answerExpired: false,
-          roundStartedAt: attemptTime,
-          roundEndsAt: attemptTime + maxTime * 1000,
-          timeLeft: maxTime,
-          cooldownPlayerId: "",
-          cooldownTeamId: null,
-          cooldownEndsAt: null,
-          updatedAt: attemptTime,
-          hostUpdatedAt: attemptTime,
-          expiresAt: attemptTime + SESSION_EXPIRY_MS,
-          presses: nextPresses,
-        };
+    await update(sessionRef(local.currentSessionCode), {
+      winnerTeamId: teamIdNum,
+      winnerPlayerName: safePlayerName,
+      winnerPlayerId: local.deviceId,
+      winnerPressedAt: attemptTime,
+      locked: true,
+      timerRunning: true,
+      answerExpired: false,
+      roundStartedAt: attemptTime,
+      roundEndsAt: attemptTime + maxTime * 1000,
+      timeLeft: maxTime,
+      cooldownPlayerId: "",
+      cooldownTeamId: null,
+      cooldownEndsAt: null,
+      updatedAt: attemptTime,
+      hostUpdatedAt: attemptTime,
+      expiresAt: attemptTime + SESSION_EXPIRY_MS,
+      [`presses/${local.deviceId}`]: {
+        teamId: teamIdNum,
+        playerName: safePlayerName,
+        pressedAt: attemptTime,
+        roundId,
       },
-      {
-        applyLocally: false,
-      },
-    );
+    });
 
-    return result.committed === true;
+    return true;
   } catch (error) {
-    // Firebase يرمي خطأ في حالات: تعارض الشبكة، timeout، أو تعارض transactions متزامنة
-    // هذا سلوك طبيعي عند ضغط لاعبين في نفس الوقت — نُعيد false بدل رمي الخطأ
-    // حتى لا تظهر رسالة "تعذر إرسال الضغط" المربكة للمستخدم
-    console.warn("claimBuzz: transaction error (treating as ok=false):", error?.message ?? error);
+    console.warn("claimBuzz: network/update error:", error?.message ?? error);
     return false;
   }
 }

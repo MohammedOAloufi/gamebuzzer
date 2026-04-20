@@ -14,7 +14,7 @@ import {
   HOST_HEARTBEAT_MS,
   getServerNow,
 } from "./state.js";
-import { get, set } from "./firebase.js";
+import { get, set, onValue } from "./firebase.js";
 import { getPlayerJoinUrl, randomCode, playAudioSafe } from "./utils.js";
 import {
   readCurrentSession,
@@ -25,7 +25,9 @@ import {
   addPoint,
   addTeam,
   sessionRef,
+  pressesRef,
   normalizeSession,
+  resolvePressesToWinner,
 } from "./session-service.js";
 import { showToast } from "./ui-renderer.js";
 import { createOrLoadSession } from "./session-runtime.js";
@@ -81,6 +83,69 @@ export function stopHostHeartbeat() {
     clearInterval(local.hostHeartbeat);
     local.hostHeartbeat = null;
   }
+}
+
+// ─────────────────────────────────────────────
+// Presses Watcher (Host-as-Authority)
+// ─────────────────────────────────────────────
+
+/**
+ * ✅ معمارية جديدة:
+ * المشرف يراقب /sessions/{code}/presses ويقرر الفائز عند وصول ضغطة جديدة.
+ *
+ * عندما يكتب لاعب press في مكانه الخاص:
+ *   sessions/{code}/presses/{deviceId}
+ *
+ * هذا الـ watcher يُشغّل وينادي resolvePressesToWinner الذي يكتب:
+ *   winnerTeamId, winnerPlayerId, locked, timerRunning, roundEndsAt, ...
+ *
+ * بما أن المشرف هو الجهاز الوحيد الذي يكتب حالة الفوز، لا توجد race
+ * conditions بين اللاعبين.
+ */
+export function stopPressesWatcher() {
+  if (typeof local.unsubscribePresses === "function") {
+    local.unsubscribePresses();
+    local.unsubscribePresses = null;
+  }
+}
+
+export function startPressesWatcher() {
+  if (pageType !== "host") return;
+  if (!local.currentSessionCode) return;
+
+  // أوقف المراقب القديم قبل بدء جديد
+  stopPressesWatcher();
+
+  const pRef = pressesRef(local.currentSessionCode);
+
+  local.unsubscribePresses = onValue(
+    pRef,
+    async (snapshot) => {
+      try {
+        if (!snapshot.exists()) return;
+
+        // اقرأ الجلسة الحالية لنعرف roundId الحالي و locked/winner
+        const sessionSnap = await get(sessionRef(local.currentSessionCode));
+        if (!sessionSnap.exists()) return;
+
+        const session = normalizeSession(
+          sessionSnap.val(),
+          local.currentSessionCode,
+        );
+
+        // resolvePressesToWinner يتحقق داخلياً من:
+        // - أن لا يوجد فائز حالي (أو أن وقته انتهى)
+        // - أن الجلسة ليست مقفلة
+        // - ثم يختار الأسبق في pressedAt
+        await resolvePressesToWinner(session);
+      } catch (error) {
+        console.error("presses watcher error:", error);
+      }
+    },
+    (error) => {
+      console.error("presses watcher subscription error:", error);
+    },
+  );
 }
 
 export function startHostHeartbeat() {
@@ -139,6 +204,7 @@ export async function cleanupInactiveSession() {
       local.lastSession = null;
       stopHostHeartbeat();
       stopTickWorker();
+      stopPressesWatcher(); // ✅ إيقاف مراقب الضغطات أيضاً
       showToast("تم حذف الجلسة غير النشطة");
     }
   } catch (error) {
@@ -312,6 +378,7 @@ export function bindHostEvents() {
 
         // ✅ startHostHeartbeat تُستدعى هنا بدلاً من داخل createOrLoadSession
         startHostHeartbeat();
+        startPressesWatcher(); // ✅ مراقبة ضغطات اللاعبين
 
         const url = new URL(window.location.href);
         url.searchParams.set("session", readyCode);

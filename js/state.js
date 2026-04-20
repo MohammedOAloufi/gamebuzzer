@@ -69,6 +69,9 @@ export const local = {
   hostHeartbeat: null,
   hostTickWorker: null,
 
+  // ✅ معمارية جديدة: مرجع الاشتراك في /presses (للمشرف فقط)
+  unsubscribePresses: null,
+
   // Heartbeats (player)
   playerHeartbeat: null,
 
@@ -89,11 +92,9 @@ export const local = {
   // آخر قيمة لـ forceUnlockToken شاهدتها الـ UI
   lastSeenForceUnlockToken: 0,
 
-  // آخر حالة شوهدت لـ answerExpired — لكشف انتقال الجولة لوضع "فرصة ثانية"
+  // آخر قيمة لـ answerExpired شاهدتها الـ UI
+  // عند تغيّرها (true→false أو false→true) نُصفّر حالة الـ buzz عند ب
   lastSeenAnswerExpired: false,
-
-  // آخر حالة شوهدت لـ locked — لكشف فتح الأزرار بعد القفل
-  lastSeenLocked: false,
 
   // آخر توقيت تشغيل حقيقي لزر الـ buzz — يمنع الـ debounce من تجاهل الضغطة
   // بعد فك القفل مباشرة

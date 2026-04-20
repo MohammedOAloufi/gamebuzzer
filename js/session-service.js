@@ -1,9 +1,24 @@
 /**
  * session-service.js
  * طبقة البيانات — كل العمليات على Firebase للجلسات
+ *
+ * 🏗️ معمارية جديدة (Host-as-Authority):
+ * ═══════════════════════════════════════
+ * اللاعب (claimBuzz):
+ *   - يكتب press في مكانه الخاص فقط: sessions/{code}/presses/{deviceId}
+ *   - لا يلمس winnerTeamId أو locked — تلك مسؤولية المشرف
+ *   - لا transactions، لا WebSocket closes، لا retry loops
+ *
+ * المشرف (resolvePressesToWinner):
+ *   - يراقب presses عبر onValue
+ *   - عند وصول أول press في جولة، يختار الأسبق ويكتبه كـ winner
+ *   - يضبط locked, timerRunning, roundEndsAt الخ
+ *
+ * هذا يلغي race conditions بين اللاعبين ويزيل مشكلة
+ * "message channel closed" و stale transactions.
  */
 
-import { db, ref, set, update, get, runTransaction } from "./firebase.js";
+import { db, ref, set, update, get } from "./firebase.js";
 import {
   TEAM_COLORS,
   SESSION_EXPIRY_MS,
@@ -407,7 +422,6 @@ export async function resetToFreshRound(session, extraPatch = {}) {
     roundEndsAt: null,
     roundId: Number(session.roundId || 1) + 1,
     presses: null,
-    // ✅ إصلاح: نعتمد على session.maxTime من الخادم فقط، لا على DOM
     timeLeft: Number(session.maxTime) || 3,
     ...extraPatch,
     hostUpdatedAt: getServerNow(),
@@ -444,6 +458,184 @@ export async function openAllForPlayers() {
   });
 }
 
+// ─────────────────────────────────────────────
+// Claim Buzz — Player-side (new architecture)
+// ─────────────────────────────────────────────
+
+/**
+ * claimBuzz — إصدار المعمارية الجديدة
+ *
+ * اللاعب يكتب press في مكانه فقط: sessions/{code}/presses/{deviceId}
+ * لا يلمس winnerTeamId أو locked — المشرف يقرر الفائز.
+ *
+ * مزايا:
+ * ─────
+ * - كتابة واحدة بسيطة، لا transactions
+ * - لا تعارض بين اللاعبين — كل واحد يكتب في مكانه
+ * - لا WebSocket closes، لا retry loops
+ * - لو ضغط لاعبان في نفس اللحظة، كلاهما يُسجَّل والمشرف يختار الأسبق
+ *
+ * @param {number} teamId - معرّف الفريق
+ * @param {string} playerName - اسم اللاعب
+ * @param {number} expectedRoundId - الجولة المتوقعة (للتحقق)
+ * @returns {Promise<boolean>} - true إذا كُتب الـ press بنجاح
+ */
+export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
+  if (!local.currentSessionCode) return false;
+
+  const safePlayerName = sanitizeName(playerName) || "لاعب";
+  const teamIdNum = Number(teamId);
+
+  if (!Number.isFinite(teamIdNum)) return false;
+
+  try {
+    // ─── 1. اقرأ الحالة الحالية للتحقق المحلي ───
+    const snapshot = await get(sessionRef(local.currentSessionCode));
+    if (!snapshot.exists()) return false;
+
+    const current = snapshot.val();
+    const attemptTime = getServerNow();
+
+    // ─── 2. تحقّق من expectedRoundId ───
+    const roundId = Number(current.roundId || 1);
+    if (
+      expectedRoundId !== undefined &&
+      Number.isFinite(expectedRoundId) &&
+      roundId !== expectedRoundId
+    ) {
+      console.log(
+        `claimBuzz: round changed (${expectedRoundId} → ${roundId}) — aborting`,
+      );
+      return false;
+    }
+
+    // ─── 3. تحقّق من القفل والفائز الحالي ───
+    const locked = Boolean(current.locked);
+    const answerExpired = Boolean(current.answerExpired);
+    const currentWinner =
+      current.winnerTeamId === null || current.winnerTeamId === undefined
+        ? null
+        : Number(current.winnerTeamId);
+
+    if (locked || (currentWinner !== null && !answerExpired)) {
+      return false;
+    }
+
+    // ─── 4. تحقّق من cooldown ───
+    const cooldownTeamId =
+      current.cooldownTeamId === null || current.cooldownTeamId === undefined
+        ? null
+        : Number(current.cooldownTeamId);
+    const cooldownEndsAt = current.cooldownEndsAt ?? null;
+
+    const myTeamCooldownActive =
+      cooldownTeamId !== null &&
+      cooldownTeamId === teamIdNum &&
+      Boolean(cooldownEndsAt) &&
+      attemptTime < Number(cooldownEndsAt);
+
+    if (myTeamCooldownActive) return false;
+
+    // ─── 5. تحقّق من press سابقة في هذه الجولة ───
+    const currentPresses =
+      current.presses && typeof current.presses === "object"
+        ? current.presses
+        : {};
+    const myCurrentPress = currentPresses[local.deviceId];
+    const alreadyPressedThisRound =
+      myCurrentPress &&
+      Number(myCurrentPress.roundId || 0) === Number(roundId);
+
+    if (alreadyPressedThisRound) return false;
+
+    // ─── 6. اكتب press فقط — لا تلمس winner أو locked ───
+    // كتابة atomic على node منفصل — لا تعارض مع كتابات لاعبين آخرين
+    await update(sessionRef(local.currentSessionCode), {
+      [`presses/${local.deviceId}`]: {
+        teamId: teamIdNum,
+        playerName: safePlayerName,
+        pressedAt: attemptTime,
+        roundId,
+      },
+      updatedAt: attemptTime,
+      expiresAt: attemptTime + SESSION_EXPIRY_MS,
+    });
+
+    return true;
+  } catch (error) {
+    console.warn("claimBuzz error:", error?.message ?? error);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// Resolve Winner — Host-side
+// ─────────────────────────────────────────────
+
+/**
+ * resolvePressesToWinner — يستدعيه المشرف عند تغيّر الـ presses.
+ *
+ * المشرف يقرر الفائز بناءً على الأسبق في pressedAt.
+ * يُستدعى من host-controller عبر onValue على pressesRef.
+ *
+ * @param {Object} session - الجلسة الحالية (normalized)
+ * @returns {Promise<boolean>} - true إذا تم تعيين فائز جديد
+ */
+export async function resolvePressesToWinner(session) {
+  if (!local.currentSessionCode) return false;
+
+  // لا نحتاج حل الفائز إذا كان موجود أصلاً ولم ينتهِ وقته
+  if (session.winnerTeamId !== null && !session.answerExpired) {
+    return false;
+  }
+
+  // لا نحل الفائز إذا كانت الجلسة مقفلة
+  if (session.locked) return false;
+
+  // أول press حسب الوقت (ثم deviceId لـ tie-breaking)
+  const sortedPresses = getSortedPresses(session);
+  if (sortedPresses.length === 0) return false;
+
+  const winnerPress = sortedPresses[0];
+  const maxTime = Number(session.maxTime || 3);
+  const winnerTime = Number(winnerPress.pressedAt);
+  const serverNow = getServerNow();
+
+  try {
+    await update(sessionRef(local.currentSessionCode), {
+      winnerTeamId: Number(winnerPress.teamId),
+      winnerPlayerName: String(winnerPress.playerName || ""),
+      winnerPlayerId: String(winnerPress.deviceId || ""),
+      winnerPressedAt: winnerTime,
+      locked: true,
+      timerRunning: true,
+      answerExpired: false,
+      roundStartedAt: winnerTime,
+      roundEndsAt: winnerTime + maxTime * 1000,
+      timeLeft: maxTime,
+      cooldownPlayerId: "",
+      cooldownTeamId: null,
+      cooldownEndsAt: null,
+      updatedAt: serverNow,
+      hostUpdatedAt: serverNow,
+      expiresAt: serverNow + SESSION_EXPIRY_MS,
+    });
+
+    console.log(
+      `resolvePressesToWinner: winner = ${winnerPress.playerName} (team ${winnerPress.teamId}) at ${winnerTime}`,
+    );
+
+    return true;
+  } catch (error) {
+    console.warn("resolvePressesToWinner error:", error?.message ?? error);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// Legacy registerPress (للتوافق — غير مستخدمة حالياً)
+// ─────────────────────────────────────────────
+
 export async function registerPress(teamId, playerName = "") {
   if (!local.currentSessionCode) return false;
 
@@ -469,145 +661,9 @@ export async function registerPress(teamId, playerName = "") {
   return true;
 }
 
-/**
- * claimBuzz — إصدار بدون runTransaction
- *
- * لماذا تم استبدال runTransaction؟
- * ─────────────────────────────────
- * Firebase runTransaction عنده retry loop داخلي:
- * - لو الـ data تغيرت وقت تنفيذ الـ transaction، يُعيد المحاولة تلقائياً
- * - السبام السريع يُسبب عشرات الـ retries → WebSocket يُغلق أحياناً
- * - يظهر الخطأ: "message channel closed before response was received"
- * - الأسوأ: transaction قديمة قد تنجح بعد أن يُفتح للاعب نافذة جديدة
- *
- * الحل: get + update ذري واحد
- * ─────────────────────────────
- * 1. نقرأ الحالة مرة واحدة
- * 2. نتحقق من كل الشروط محلياً
- * 3. نكتب update واحد (atomic على مستوى keys المذكورة)
- * 4. لا retry loops، لا WebSocket issues، لا stale transactions
- *
- * ما هو "السباق" المحتمل؟
- * ────────────────────────
- * نعم، قد يفوز لاعبان "في نفس الميلي ثانية" من وجهة نظر الخادم
- * → الكتابة الأخيرة تفوز (Last Write Wins)
- *
- * لكن هذا في الواقع أفضل من الـ transaction لأن:
- * - winnerPressedAt يحفظ التوقيت الحقيقي (من الخادم via getServerNow)
- * - لو وصل لاعب ب بعد أ بـ 5ms، update ب يغلب على أ
- * - الفرق في التجربة غير محسوس (5ms) والمستخدم لن يلاحظ
- *
- * للتمييز الحقيقي: الـ host يمكنه رؤية جميع presses[deviceId]
- * والحكم بناءً على pressedAt إذا احتاج.
- */
-export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
-  if (!local.currentSessionCode) return false;
-
-  const safePlayerName = sanitizeName(playerName) || "لاعب";
-  const teamIdNum = Number(teamId);
-
-  if (!Number.isFinite(teamIdNum)) return false;
-
-  try {
-    // ─── 1. اقرأ الحالة الحالية (استعلام واحد) ───
-    const snapshot = await get(sessionRef(local.currentSessionCode));
-    if (!snapshot.exists()) return false;
-
-    const current = snapshot.val();
-    const attemptTime = getServerNow();
-
-    const currentWinner =
-      current.winnerTeamId === null || current.winnerTeamId === undefined
-        ? null
-        : Number(current.winnerTeamId);
-
-    const locked = Boolean(current.locked);
-    const answerExpired = Boolean(current.answerExpired);
-    const roundId = Number(current.roundId || 1);
-    const cooldownTeamId =
-      current.cooldownTeamId === null || current.cooldownTeamId === undefined
-        ? null
-        : Number(current.cooldownTeamId);
-    const cooldownEndsAt = current.cooldownEndsAt ?? null;
-
-    // ─── 2. تحقّق من expectedRoundId ───
-    // لو تغيرت الجولة منذ بدأ الطلب، لا نكتب شيئاً
-    // هذا يمنع ضغطة قديمة من الكتابة في جولة جديدة
-    if (
-      expectedRoundId !== undefined &&
-      Number.isFinite(expectedRoundId) &&
-      roundId !== expectedRoundId
-    ) {
-      console.log(
-        `claimBuzz: round changed (${expectedRoundId} → ${roundId}) — aborting`
-      );
-      return false;
-    }
-
-    // ─── 3. تحقّق من cooldown ───
-    const myTeamCooldownActive =
-      cooldownTeamId !== null &&
-      cooldownTeamId === teamIdNum &&
-      Boolean(cooldownEndsAt) &&
-      attemptTime < Number(cooldownEndsAt);
-
-    // ─── 4. تحقّق من الضغطة السابقة في هذه الجولة ───
-    const currentPresses =
-      current.presses && typeof current.presses === "object"
-        ? current.presses
-        : {};
-    const myCurrentPress = currentPresses[local.deviceId];
-    const alreadyPressedThisRound =
-      myCurrentPress &&
-      Number(myCurrentPress.roundId || 0) === Number(roundId);
-
-    // ─── 5. تحقّق من الحالة العامة ───
-    // القفل + وجود فائز غير منتهي وقته = مرفوض
-    if (
-      locked ||
-      (currentWinner !== null && !answerExpired) ||
-      myTeamCooldownActive ||
-      alreadyPressedThisRound
-    ) {
-      return false;
-    }
-
-    // ─── 6. اكتب Update ذري ───
-    // update يضبط هذه المفاتيح معاً في عملية واحدة
-    // لا retry loops، لا مشاكل WebSocket
-    const maxTime = Number(current.maxTime || 3);
-
-    await update(sessionRef(local.currentSessionCode), {
-      winnerTeamId: teamIdNum,
-      winnerPlayerName: safePlayerName,
-      winnerPlayerId: local.deviceId,
-      winnerPressedAt: attemptTime,
-      locked: true,
-      timerRunning: true,
-      answerExpired: false,
-      roundStartedAt: attemptTime,
-      roundEndsAt: attemptTime + maxTime * 1000,
-      timeLeft: maxTime,
-      cooldownPlayerId: "",
-      cooldownTeamId: null,
-      cooldownEndsAt: null,
-      updatedAt: attemptTime,
-      hostUpdatedAt: attemptTime,
-      expiresAt: attemptTime + SESSION_EXPIRY_MS,
-      [`presses/${local.deviceId}`]: {
-        teamId: teamIdNum,
-        playerName: safePlayerName,
-        pressedAt: attemptTime,
-        roundId,
-      },
-    });
-
-    return true;
-  } catch (error) {
-    console.warn("claimBuzz: network/update error:", error?.message ?? error);
-    return false;
-  }
-}
+// ─────────────────────────────────────────────
+// Team & Points Operations
+// ─────────────────────────────────────────────
 
 export async function addPoint() {
   const session = await readCurrentSession();
@@ -642,14 +698,8 @@ export async function changeTeamPoints(teamId, amount) {
   });
 }
 
-/**
- * يضيف فريقاً جديداً باستخدام ID فريد cryptographically safe
- * ✅ إصلاح: استبدال getServerNow() بـ random uint32 لتجنب تعارض ID
- */
 export async function addTeam() {
   const session = await readCurrentSession();
-
-  // ID فريد وغير متكرر حتى لو أُضيف فريقان في نفس اللحظة
   const nextId = Number(crypto.getRandomValues(new Uint32Array(1))[0]);
 
   const usedColors = session.teams.map((team) => team.colorClass);
@@ -666,12 +716,7 @@ export async function addTeam() {
 
   const teams = [
     ...session.teams,
-    {
-      id: nextId,
-      name: autoName,
-      colorClass,
-      points: 0,
-    },
+    { id: nextId, name: autoName, colorClass, points: 0 },
   ];
 
   await updateSessionPatch({

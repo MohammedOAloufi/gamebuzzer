@@ -24,8 +24,10 @@ import {
 import {
   bindHostEvents,
   startHostHeartbeat,
+  startPressesWatcher,
   startTickWorker,
   stopHostHeartbeat,
+  stopPressesWatcher,
   stopTickWorker,
 } from "./host-controller.js";
 import {
@@ -142,6 +144,7 @@ function bindVisibilityEvents() {
   window.addEventListener("beforeunload", () => {
     stopPlayerHeartbeat();
     stopHostHeartbeat();
+    stopPressesWatcher(); // ✅ إيقاف مراقب الضغطات
     stopTickWorker();
   });
 }
@@ -190,6 +193,7 @@ async function boot() {
 
     // ✅ إصلاح: startHostHeartbeat هنا بعد إنشاء الجلسة (لا داخل session-runtime)
     startHostHeartbeat();
+    startPressesWatcher(); // ✅ معمارية جديدة: مراقبة ضغطات اللاعبين
 
     const url = new URL(window.location.href);
     url.searchParams.set("session", readyCode);

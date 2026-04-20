@@ -89,6 +89,12 @@ export const local = {
   // آخر قيمة لـ forceUnlockToken شاهدتها الـ UI
   lastSeenForceUnlockToken: 0,
 
+  // آخر حالة شوهدت لـ answerExpired — لكشف انتقال الجولة لوضع "فرصة ثانية"
+  lastSeenAnswerExpired: false,
+
+  // آخر حالة شوهدت لـ locked — لكشف فتح الأزرار بعد القفل
+  lastSeenLocked: false,
+
   // آخر توقيت تشغيل حقيقي لزر الـ buzz — يمنع الـ debounce من تجاهل الضغطة
   // بعد فك القفل مباشرة
   lastPressTriggerAt: 0,

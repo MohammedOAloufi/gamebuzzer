@@ -252,6 +252,27 @@ function resetPlayerBuzzUiState(session) {
     local.playerUiRoundId = currentRoundId;
     clearPlayerRoundState();
   }
+
+  // ✅ إصلاح: كشف انتقال answerExpired أو فتح القفل (فرصة ثانية بنفس الجولة)
+  // عندما ينتهي الوقت وتُفتح الأزرار، الـ roundId لا يتغير
+  // لكن يجب إعادة ضبط حالة اللاعب حتى يتمكن من الضغط مجدداً
+  const currentAnswerExpired = Boolean(session.answerExpired);
+  const currentLocked = Boolean(session.locked);
+
+  const answerJustExpired =
+    currentAnswerExpired && !local.lastSeenAnswerExpired;
+  const justUnlocked =
+    !currentLocked && local.lastSeenLocked;
+
+  if (answerJustExpired || justUnlocked) {
+    console.log(
+      `resetPlayerBuzzUiState: buzzer reopened (answerExpired: ${local.lastSeenAnswerExpired}→${currentAnswerExpired}, locked: ${local.lastSeenLocked}→${currentLocked}), clearing state`
+    );
+    clearPlayerRoundState();
+  }
+
+  local.lastSeenAnswerExpired = currentAnswerExpired;
+  local.lastSeenLocked = currentLocked;
 }
 
 // ─────────────────────────────────────────────
@@ -779,10 +800,11 @@ export function renderSession(session) {
 
   // ✅ Safety Valve: لو playerBuzzInFlight=true لفترة أطول من الـ timeout + هامش أمان،
   // يعني الـ timeout لم يُشغَّل لسبب ما (tab كان في الخلفية مثلاً) — نفك القفل بالقوة
+  // ✅ أيضاً: لو buzzStartedAt=0 وplayerBuzzInFlight=true يعني القفل معلق بدون طلب فعلي
   if (
     local.playerBuzzInFlight &&
-    local.buzzStartedAt > 0 &&
-    Date.now() - local.buzzStartedAt > (2000 + 500)  // BUZZ_INFLIGHT_TIMEOUT_MS + 500ms هامش
+    (local.buzzStartedAt === 0 ||
+      Date.now() - local.buzzStartedAt > (2000 + 500))  // BUZZ_INFLIGHT_TIMEOUT_MS + 500ms هامش
   ) {
     console.warn("renderSession: stale buzz lock detected — force releasing");
     local.buzzToken = (local.buzzToken || 0) + 1;

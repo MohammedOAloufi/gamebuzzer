@@ -313,7 +313,11 @@ async function handleBuzzInput() {
 
       // ❌ إزالة shouldRetryBuzz لأنها تسبب deadlock
       // عند فشل claimBuzz (لاعب آخر سبقك)، فقط اعرض الرسالة
-      showToast(getBuzzRejectMessage(localReason || "another_player_won"), true);
+      // ✅ إصلاح: لا نعرض رسالة إذا كان السبب المحلي null
+      // (الجلسة مفتوحة الآن = race condition مؤقتة، اللاعب سيضغط مجدداً تلقائياً)
+      if (localReason) {
+        showToast(getBuzzRejectMessage(localReason), true);
+      }
       return;
     }
 
@@ -394,6 +398,9 @@ function bindBuzzButtonEvents() {
       event.preventDefault();
       event.stopPropagation();
     }
+
+    // ✅ إصلاح: على الجوال، touchend يُطلق حتى على الأزرار المعطّلة — نمنعه هنا صراحةً
+    if (els.deviceBuzzBtn?.disabled) return;
 
     // ✅ منع spam: حجب فوري قبل حتى handleBuzzInput
     if (local.playerBuzzInFlight) {

@@ -694,20 +694,7 @@ export function renderPlayerTeam(session) {
 // ─────────────────────────────────────────────
 
 export function renderSession(session) {
-  // ✅ إصلاح Bug 6 (المستوى 3): تنظيف حالة اللاعب عند تغيير الجولة
-  clearPlayerRoundStateGuard(session.roundId);
-  resetPlayerBuzzUiState(session);
-
-  if (els.sessionCode) els.sessionCode.textContent = session.code;
-  if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
-  if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
-
-  if (els.joinUrlText) {
-    els.joinUrlText.textContent = getPlayerJoinUrl(session.code);
-  }
-
-  updateQRCode(session.code);
-
+  // ✅ حساب locallyFinished أولاً — يجب أن يسبق إدارة الحالة
   const serverNow = getServerNow();
 
   let displayTimeRaw = Number(session.timeLeft || session.maxTime || 0);
@@ -720,6 +707,29 @@ export function renderSession(session) {
     showDecimalTime = true;
     locallyFinished = leftMs <= 0;
   }
+
+  // ✅ إصلاح: عندما ينتهي وقت الإجابة محلياً قبل أن يُأكّده Firebase
+  // (تبويب المضيف في الخلفية / مخنوق)، نعامل الجلسة كـ answerExpired=true
+  // حتى يُفتح الزر لسائر اللاعبين ولا تبقى الحالة معلقة إلى الأبد.
+  const localTimerExpired =
+    locallyFinished && !session.answerExpired && session.winnerTeamId !== null;
+  const buzzSession = localTimerExpired
+    ? { ...session, answerExpired: true, locked: false }
+    : session;
+
+  // ✅ إصلاح Bug 6 (المستوى 3): تنظيف حالة اللاعب عند تغيير الجولة
+  clearPlayerRoundStateGuard(buzzSession.roundId);
+  resetPlayerBuzzUiState(buzzSession);
+
+  if (els.sessionCode) els.sessionCode.textContent = session.code;
+  if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
+  if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
+
+  if (els.joinUrlText) {
+    els.joinUrlText.textContent = getPlayerJoinUrl(session.code);
+  }
+
+  updateQRCode(session.code);
 
   const activeCooldownSeconds = getCooldownSecondsLeft(session);
   const cooldownDisplay =
@@ -819,12 +829,13 @@ export function renderSession(session) {
   }
 
   if (els.deviceBuzzBtn) {
-    const playerBlockedReason = getBuzzBlockReason(session, { strict: true });
+    // ✅ إصلاح: استخدام buzzSession (يعكس انتهاء الوقت المحلي) بدلاً من session الخام
+    const playerBlockedReason = getBuzzBlockReason(buzzSession, { strict: true });
     const localConfirmedAttemptThisRound =
       Number(local.playerAttemptRoundId) === Number(session.roundId);
 
+    // ✅ إصلاح: حُذف !locallyFinished — buzzSession يتكفل بذلك الآن
     const enabled =
-      !locallyFinished &&
       !local.playerBuzzInFlight &&
       playerBlockedReason === null &&
       !localConfirmedAttemptThisRound;

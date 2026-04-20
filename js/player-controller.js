@@ -421,10 +421,11 @@ function bindBuzzButtonEvents() {
       await handleBuzzInput();
     } catch (error) {
       // ✅ إذا حدث خطأ، فك القفل فوراً
+      // ✅ لا نعيد رمي الخطأ — مستمعات الأحداث لا تنتظر الـ Promise
+      //    وإعادة الرمي تسبب "Uncaught (in promise)" غير مفيد
       console.error("buzz handler error:", error);
       local.playerBuzzInFlight = false;
       local.lastPressTriggerAt = 0;  // أعد تعيين debounce
-      throw error;
     }
   };
 

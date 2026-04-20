@@ -508,6 +508,15 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
           return;
         }
 
+        // ✅ إصلاح: رفض Firebase retries القديمة التي تنجح بعد فتح نافذة ضغط جديدة
+        // attemptTime = وقت الضغطة الأصلية من العميل
+        // hostUpdatedAt = وقت آخر تغيير في حالة الجلسة (فتح الجلسة / انتهاء الوقت)
+        // إذا كانت الضغطة قبل فتح النافذة الحالية → نلغيها (stale retry)
+        const windowOpenedAt = Number(current.hostUpdatedAt || 0);
+        if (windowOpenedAt > 0 && attemptTime < windowOpenedAt) {
+          return; // ضغطة قديمة من نافذة سابقة — ليست ضغطة حقيقية في الفرصة الحالية
+        }
+
         const myTeamCooldownActive =
           cooldownTeamId !== null &&
           cooldownTeamId === teamIdNum &&

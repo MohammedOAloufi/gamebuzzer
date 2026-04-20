@@ -259,14 +259,15 @@ function resetPlayerBuzzUiState(session) {
   const currentAnswerExpired = Boolean(session.answerExpired);
   const currentLocked = Boolean(session.locked);
 
-  const answerJustExpired =
-    currentAnswerExpired && !local.lastSeenAnswerExpired;
-  const justUnlocked =
-    !currentLocked && local.lastSeenLocked;
+  // ✅ إصلاح: أي تغيير في answerExpired (بأي اتجاه) يعني تغير حالة الجلسة
+  // سواء false→true (انتهى الوقت) أو true→false (جولة جديدة بنفس roundId)
+  // → نصفّر lastPressTriggerAt حتى لا يبقى الـ debounce معلقاً بعد آخر سبام
+  const answerExpiredChanged = currentAnswerExpired !== local.lastSeenAnswerExpired;
+  const justUnlocked = !currentLocked && local.lastSeenLocked;
 
-  if (answerJustExpired || justUnlocked) {
+  if (answerExpiredChanged || justUnlocked) {
     console.log(
-      `resetPlayerBuzzUiState: buzzer reopened (answerExpired: ${local.lastSeenAnswerExpired}→${currentAnswerExpired}, locked: ${local.lastSeenLocked}→${currentLocked}), clearing state`
+      `resetPlayerBuzzUiState: state window changed (answerExpired: ${local.lastSeenAnswerExpired}→${currentAnswerExpired}, locked: ${local.lastSeenLocked}→${currentLocked}), clearing state`
     );
     clearPlayerRoundState();
   }

@@ -321,19 +321,25 @@ async function handleBuzzInput() {
       return;
     }
 
-    // ✅ إصلاح Bug 2:
-    // نتحقق من أن الجولة لم تتغير خلال وقت انتظار claimBuzz
-    // لو تغيرت، لا نسجّل الضغطة — المستخدم سيتمكن من الضغط في الجولة الجديدة
+    // ✅ إصلاح Bug 2: التحقق من أن الجولة لم تتغير خلال انتظار claimBuzz
+    // ✅ إصلاح Firebase Retry: التحقق أيضاً من أن buzzToken لم يتغير
+    // buzzToken يتغير عندما تستدعي clearPlayerRoundState (عند تغيير حالة الجلسة)
+    // → إذا تغير الـ token، يعني Firebase كان يُعيد المحاولة بعد فتح الجلسة بصمت
+    //   ونجح تلقائياً رغم أن اللاعب لم يضغط عن قصد في النافذة الجديدة
+    //   → لا نُسجّل الضغطة حتى لا يُمنع من الضغط مجدداً
     const roundIdNow = getCurrentRoundIdFromLocalSession();
 
-    if (roundIdNow === roundIdAtBuzzStart) {
+    if (roundIdNow === roundIdAtBuzzStart && local.buzzToken === myToken) {
       local.playerAttemptRoundId = roundIdAtBuzzStart;
-    } else {
-      // الجولة تغيرت خلال الانتظار — الـ transaction ألغي أصلاً على الخادم
-      // (claimBuzz يتحقق من expectedRoundId)، لذا ok=true هنا غير متوقع
-      // لكن كاحتياط لا نسجّل أي ضغطة
+    } else if (roundIdNow !== roundIdAtBuzzStart) {
       local.playerAttemptRoundId = null;
       console.warn("buzz ok=true but round changed — ignoring attempt record");
+    } else {
+      // local.buzzToken !== myToken: clearPlayerRoundState استُدعيت بعد بدء الـ buzz
+      // هذا يعني Firebase أعادت محاولة قديمة ونجحت في نافذة الجولة الجديدة
+      // لا نسجّل الضغطة — اللاعب سيضغط بنفسه إذا أراد
+      local.playerAttemptRoundId = null;
+      console.warn("buzz ok=true but buzzToken changed (stale Firebase retry) — ignoring attempt record");
     }
   } catch (error) {
     console.error("handleBuzzInput error:", error);

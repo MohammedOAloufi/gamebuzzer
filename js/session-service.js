@@ -11,14 +11,14 @@
  *
  * المشرف (resolvePressesToWinner):
  *   - يراقب presses عبر onValue
- *   - عند وصول أول press في جولة، يختار الأسبق ويكتبه كـ winner
+ *   - عند وصول أول press في جولة، يحاول أخذ resolution lock ذري
+ *   - إذا أخذ القفل، يختار الأسبق ويكتبه كـ winner
  *   - يضبط locked, timerRunning, roundEndsAt الخ
  *
- * هذا يلغي race conditions بين اللاعبين ويزيل مشكلة
- * "message channel closed" و stale transactions.
+ * هذا يمنع دخول أكثر من مسار حسم لنفس الجولة في نفس اللحظة.
  */
 
-import { db, ref, set, update, get } from "./firebase.js";
+import { db, ref, set, update, get, runTransaction } from "./firebase.js";
 import {
   TEAM_COLORS,
   SESSION_EXPIRY_MS,
@@ -27,6 +27,8 @@ import {
 } from "./state.js";
 import { sanitizeName, getTeamDisplayNameByColor } from "./utils.js";
 import { els } from "./dom.js";
+
+const RESOLUTION_LOCK_TTL_MS = 2500;
 
 // ─────────────────────────────────────────────
 // Default Data
@@ -69,6 +71,10 @@ export function myPressRef(code) {
   return ref(db, `sessions/${code}/presses/${local.deviceId}`);
 }
 
+export function resolutionLockRef(code) {
+  return ref(db, `sessions/${code}/resolutionLock`);
+}
+
 // ─────────────────────────────────────────────
 // Session Normalization
 // ─────────────────────────────────────────────
@@ -87,7 +93,12 @@ export function normalizeSession(raw, code) {
   const parsedForceUnlockToken = Number(raw?.forceUnlockToken);
 
   const safePresses =
-    raw?.presses && typeof raw.presses === "object" ? raw.presses : {};
+    raw?.presses && typeof raw?.presses === "object" ? raw.presses : {};
+
+  const resolutionLock =
+    raw?.resolutionLock && typeof raw?.resolutionLock === "object"
+      ? raw.resolutionLock
+      : {};
 
   return {
     code,
@@ -120,8 +131,15 @@ export function normalizeSession(raw, code) {
       raw?.cooldownTeamId === null || raw?.cooldownTeamId === undefined
         ? null
         : Number(raw.cooldownTeamId),
+    resolutionLock: {
+      active: Boolean(resolutionLock.active),
+      roundId: Number(resolutionLock.roundId || 0),
+      owner: String(resolutionLock.owner || ""),
+      expiresAt: Number(resolutionLock.expiresAt || 0),
+      createdAt: Number(resolutionLock.createdAt || 0),
+    },
     presence:
-      raw?.presence && typeof raw.presence === "object" ? raw.presence : {},
+      raw?.presence && typeof raw?.presence === "object" ? raw.presence : {},
     presses: Object.entries(safePresses).reduce((acc, [deviceId, press]) => {
       if (!press || typeof press !== "object") return acc;
 
@@ -196,15 +214,12 @@ export function hasMyPressInCurrentRound(session) {
 
 export function getBuzzBlockReason(session, options = {}) {
   const { strict = false } = options;
-  const roundExpired = hasRoundExpired(session);
-  const effectiveLocked = Boolean(session.locked) && !roundExpired;
-  const effectiveAnswerExpired = Boolean(session.answerExpired) || roundExpired;
 
   if (!local.joinedPlayer) return "join_required";
-  if (effectiveLocked) return "round_locked";
+  if (session.locked) return "round_locked";
   if (isMyCooldownActive(session)) return "team_cooldown";
 
-  if (session.winnerTeamId !== null && !effectiveAnswerExpired) {
+  if (session.winnerTeamId !== null && !session.answerExpired) {
     if (session.winnerPlayerId && session.winnerPlayerId !== local.deviceId) {
       return "another_player_won";
     }
@@ -259,10 +274,106 @@ export function getSortedPresses(session) {
     });
 }
 
-export function hasRoundExpired(sessionLike) {
-  const roundEndsAt = Number(sessionLike?.roundEndsAt || 0);
-  if (!roundEndsAt) return false;
-  return getServerNow() >= roundEndsAt;
+export function isResolutionLockActive(session) {
+  return (
+    Boolean(session?.resolutionLock?.active) &&
+    Number(session?.resolutionLock?.expiresAt || 0) > getServerNow() &&
+    Number(session?.resolutionLock?.roundId || 0) ===
+      Number(session?.roundId || 0)
+  );
+}
+
+function buildResolutionLockOwner() {
+  return `host:${local.deviceId}:${Date.now()}:${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+export async function acquireResolutionLock(roundId) {
+  if (!local.currentSessionCode) {
+    return { ok: false, owner: "" };
+  }
+
+  const owner = buildResolutionLockOwner();
+  const now = getServerNow();
+  const expiresAt = now + RESOLUTION_LOCK_TTL_MS;
+
+  const result = await runTransaction(
+    resolutionLockRef(local.currentSessionCode),
+    (current) => {
+      const currentActive = Boolean(current?.active);
+      const currentRoundId = Number(current?.roundId || 0);
+      const currentExpiresAt = Number(current?.expiresAt || 0);
+      const currentStillValid = currentActive && currentExpiresAt > now;
+
+      if (currentStillValid && currentRoundId === Number(roundId)) {
+        return;
+      }
+
+      return {
+        active: true,
+        roundId: Number(roundId || 0),
+        owner,
+        createdAt: now,
+        expiresAt,
+      };
+    },
+    { applyLocally: false },
+  );
+
+  const lockValue = result?.snapshot?.val?.();
+
+  const acquired =
+    Boolean(result?.committed) &&
+    lockValue &&
+    String(lockValue.owner || "") === owner &&
+    Number(lockValue.roundId || 0) === Number(roundId || 0);
+
+  return { ok: acquired, owner };
+}
+
+export async function releaseResolutionLock(owner = "", roundId = null) {
+  if (!local.currentSessionCode) return;
+
+  try {
+    await runTransaction(
+      resolutionLockRef(local.currentSessionCode),
+      (current) => {
+        if (!current || typeof current !== "object") {
+          return {
+            active: false,
+            roundId: 0,
+            owner: "",
+            createdAt: 0,
+            expiresAt: 0,
+          };
+        }
+
+        if (owner && String(current.owner || "") !== String(owner)) {
+          return;
+        }
+
+        if (
+          roundId !== null &&
+          roundId !== undefined &&
+          Number(current.roundId || 0) !== Number(roundId)
+        ) {
+          return;
+        }
+
+        return {
+          active: false,
+          roundId: 0,
+          owner: "",
+          createdAt: 0,
+          expiresAt: 0,
+        };
+      },
+      { applyLocally: false },
+    );
+  } catch (error) {
+    console.warn("releaseResolutionLock error:", error?.message ?? error);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -313,6 +424,13 @@ export async function ensureSession(code) {
       winnerPressedAt: null,
       roundStartedAt: null,
       roundEndsAt: null,
+      resolutionLock: {
+        active: false,
+        roundId: 0,
+        owner: "",
+        createdAt: 0,
+        expiresAt: 0,
+      },
       teams: defaultTeams(),
       presses: null,
       cooldown: 0,
@@ -355,6 +473,16 @@ export async function ensureSession(code) {
 
   if (!Number.isFinite(Number(current.forceUnlockToken))) {
     patch.forceUnlockToken = 0;
+  }
+
+  if (!current.resolutionLock || typeof current.resolutionLock !== "object") {
+    patch.resolutionLock = {
+      active: false,
+      roundId: 0,
+      owner: "",
+      createdAt: 0,
+      expiresAt: 0,
+    };
   }
 
   if (
@@ -432,7 +560,13 @@ export async function resetToFreshRound(session, extraPatch = {}) {
     roundId: Number(session.roundId || 1) + 1,
     presses: null,
     timeLeft: Number(session.maxTime) || 3,
-    forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
+    resolutionLock: {
+      active: false,
+      roundId: 0,
+      owner: "",
+      createdAt: 0,
+      expiresAt: 0,
+    },
     ...extraPatch,
     hostUpdatedAt: getServerNow(),
   });
@@ -464,6 +598,7 @@ export async function openAllForPlayers() {
     cooldownEndsAt: null,
     cooldownPlayerId: "",
     cooldownTeamId: null,
+    forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
   });
 }
 
@@ -471,24 +606,6 @@ export async function openAllForPlayers() {
 // Claim Buzz — Player-side (new architecture)
 // ─────────────────────────────────────────────
 
-/**
- * claimBuzz — إصدار المعمارية الجديدة
- *
- * اللاعب يكتب press في مكانه فقط: sessions/{code}/presses/{deviceId}
- * لا يلمس winnerTeamId أو locked — المشرف يقرر الفائز.
- *
- * مزايا:
- * ─────
- * - كتابة واحدة بسيطة، لا transactions
- * - لا تعارض بين اللاعبين — كل واحد يكتب في مكانه
- * - لا WebSocket closes، لا retry loops
- * - لو ضغط لاعبان في نفس اللحظة، كلاهما يُسجَّل والمشرف يختار الأسبق
- *
- * @param {number} teamId - معرّف الفريق
- * @param {string} playerName - اسم اللاعب
- * @param {number} expectedRoundId - الجولة المتوقعة (للتحقق)
- * @returns {Promise<boolean>} - true إذا كُتب الـ press بنجاح
- */
 export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
   if (!local.currentSessionCode) return false;
 
@@ -498,17 +615,12 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
   if (!Number.isFinite(teamIdNum)) return false;
 
   try {
-    // ─── 1. اقرأ الحالة الحالية للتحقق المحلي ───
     const snapshot = await get(sessionRef(local.currentSessionCode));
     if (!snapshot.exists()) return false;
 
     const current = snapshot.val();
     const attemptTime = getServerNow();
-    const roundExpired =
-      Boolean(current?.roundEndsAt) &&
-      attemptTime >= Number(current.roundEndsAt);
 
-    // ─── 2. تحقّق من expectedRoundId ───
     const roundId = Number(current.roundId || 1);
     if (
       expectedRoundId !== undefined &&
@@ -521,9 +633,8 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
       return false;
     }
 
-    // ─── 3. تحقّق من القفل والفائز الحالي ───
-    const locked = Boolean(current.locked) && !roundExpired;
-    const answerExpired = Boolean(current.answerExpired) || roundExpired;
+    const locked = Boolean(current.locked);
+    const answerExpired = Boolean(current.answerExpired);
     const currentWinner =
       current.winnerTeamId === null || current.winnerTeamId === undefined
         ? null
@@ -533,25 +644,6 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
       return false;
     }
 
-    // ─── 3.5. self-heal لو الوقت انتهى لكن المشرف لم يحدّث الجلسة بعد ───
-    if (roundExpired && currentWinner !== null) {
-      await update(sessionRef(local.currentSessionCode), {
-        timeLeft: 0,
-        timerRunning: false,
-        answerExpired: true,
-        roundEndsAt: null,
-        roundStartedAt: null,
-        locked: false,
-        forceUnlockToken: Number(current.forceUnlockToken || 0) + 1,
-        presses: null,
-        updatedAt: attemptTime,
-        expiresAt: attemptTime + SESSION_EXPIRY_MS,
-      });
-
-      return false;
-    }
-
-    // ─── 4. تحقّق من cooldown ───
     const cooldownTeamId =
       current.cooldownTeamId === null || current.cooldownTeamId === undefined
         ? null
@@ -566,7 +658,6 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 
     if (myTeamCooldownActive) return false;
 
-    // ─── 5. تحقّق من press سابقة في هذه الجولة ───
     const currentPresses =
       current.presses && typeof current.presses === "object"
         ? current.presses
@@ -578,8 +669,6 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 
     if (alreadyPressedThisRound) return false;
 
-    // ─── 6. اكتب press فقط — لا تلمس winner أو locked ───
-    // كتابة atomic على node منفصل — لا تعارض مع كتابات لاعبين آخرين
     await update(sessionRef(local.currentSessionCode), {
       [`presses/${local.deviceId}`]: {
         teamId: teamIdNum,
@@ -602,36 +691,49 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 // Resolve Winner — Host-side
 // ─────────────────────────────────────────────
 
-/**
- * resolvePressesToWinner — يستدعيه المشرف عند تغيّر الـ presses.
- *
- * المشرف يقرر الفائز بناءً على الأسبق في pressedAt.
- * يُستدعى من host-controller عبر onValue على pressesRef.
- *
- * @param {Object} session - الجلسة الحالية (normalized)
- * @returns {Promise<boolean>} - true إذا تم تعيين فائز جديد
- */
 export async function resolvePressesToWinner(session) {
   if (!local.currentSessionCode) return false;
 
-  // لا نحتاج حل الفائز إذا كان موجود أصلاً ولم ينتهِ وقته
   if (session.winnerTeamId !== null && !session.answerExpired) {
     return false;
   }
 
-  // لا نحل الفائز إذا كانت الجلسة مقفلة
   if (session.locked) return false;
 
-  // أول press حسب الوقت (ثم deviceId لـ tie-breaking)
   const sortedPresses = getSortedPresses(session);
   if (sortedPresses.length === 0) return false;
 
-  const winnerPress = sortedPresses[0];
-  const maxTime = Number(session.maxTime || 3);
-  const winnerTime = Number(winnerPress.pressedAt);
-  const serverNow = getServerNow();
+  const targetRoundId = Number(session.roundId || 1);
+  const lock = await acquireResolutionLock(targetRoundId);
+  if (!lock.ok) {
+    return false;
+  }
 
   try {
+    const freshSession = await readCurrentSession();
+
+    if (Number(freshSession.roundId || 0) !== targetRoundId) {
+      return false;
+    }
+
+    if (freshSession.locked) {
+      return false;
+    }
+
+    if (freshSession.winnerTeamId !== null && !freshSession.answerExpired) {
+      return false;
+    }
+
+    const freshPresses = getSortedPresses(freshSession);
+    if (freshPresses.length === 0) {
+      return false;
+    }
+
+    const winnerPress = freshPresses[0];
+    const maxTime = Number(freshSession.maxTime || 3);
+    const winnerTime = Number(winnerPress.pressedAt);
+    const serverNow = getServerNow();
+
     await update(sessionRef(local.currentSessionCode), {
       winnerTeamId: Number(winnerPress.teamId),
       winnerPlayerName: String(winnerPress.playerName || ""),
@@ -646,6 +748,13 @@ export async function resolvePressesToWinner(session) {
       cooldownPlayerId: "",
       cooldownTeamId: null,
       cooldownEndsAt: null,
+      resolutionLock: {
+        active: false,
+        roundId: 0,
+        owner: "",
+        createdAt: 0,
+        expiresAt: 0,
+      },
       updatedAt: serverNow,
       hostUpdatedAt: serverNow,
       expiresAt: serverNow + SESSION_EXPIRY_MS,
@@ -659,6 +768,8 @@ export async function resolvePressesToWinner(session) {
   } catch (error) {
     console.warn("resolvePressesToWinner error:", error?.message ?? error);
     return false;
+  } finally {
+    await releaseResolutionLock(lock.owner, targetRoundId);
   }
 }
 
@@ -783,7 +894,13 @@ export async function removeTeam(teamId) {
     patch.roundId = Number(session.roundId || 1) + 1;
     patch.presses = null;
     patch.timeLeft = session.maxTime || 3;
-    patch.forceUnlockToken = Number(session.forceUnlockToken || 0) + 1;
+    patch.resolutionLock = {
+      active: false,
+      roundId: 0,
+      owner: "",
+      createdAt: 0,
+      expiresAt: 0,
+    };
   }
 
   if (Number(session.cooldownTeamId) === Number(teamId)) {

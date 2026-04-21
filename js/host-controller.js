@@ -3,6 +3,7 @@
  * منطق المشرف — الـ heartbeat، الـ tick worker، وإدارة الأحداث
  *
  * ✅ إصلاح: تمت إزالة playAudioSafe المكررة — مستوردة الآن من utils.js
+ * ✅ جديد: عند انتهاء الوقت أو فتح جولة جديدة يتم تصفير resolutionLock
  */
 
 import { els } from "./dom.js";
@@ -63,7 +64,6 @@ export async function syncHostSettings() {
       hostUpdatedAt: getServerNow(),
     };
 
-    // لا تُحدَّث timeLeft إذا كان المؤقت يعمل
     if (!session.timerRunning) {
       patch.timeLeft = newMaxTime;
     }
@@ -89,19 +89,6 @@ export function stopHostHeartbeat() {
 // Presses Watcher (Host-as-Authority)
 // ─────────────────────────────────────────────
 
-/**
- * ✅ معمارية جديدة:
- * المشرف يراقب /sessions/{code}/presses ويقرر الفائز عند وصول ضغطة جديدة.
- *
- * عندما يكتب لاعب press في مكانه الخاص:
- *   sessions/{code}/presses/{deviceId}
- *
- * هذا الـ watcher يُشغّل وينادي resolvePressesToWinner الذي يكتب:
- *   winnerTeamId, winnerPlayerId, locked, timerRunning, roundEndsAt, ...
- *
- * بما أن المشرف هو الجهاز الوحيد الذي يكتب حالة الفوز، لا توجد race
- * conditions بين اللاعبين.
- */
 export function stopPressesWatcher() {
   if (typeof local.unsubscribePresses === "function") {
     local.unsubscribePresses();
@@ -113,7 +100,6 @@ export function startPressesWatcher() {
   if (pageType !== "host") return;
   if (!local.currentSessionCode) return;
 
-  // أوقف المراقب القديم قبل بدء جديد
   stopPressesWatcher();
 
   const pRef = pressesRef(local.currentSessionCode);
@@ -124,7 +110,6 @@ export function startPressesWatcher() {
       try {
         if (!snapshot.exists()) return;
 
-        // اقرأ الجلسة الحالية لنعرف roundId الحالي و locked/winner
         const sessionSnap = await get(sessionRef(local.currentSessionCode));
         if (!sessionSnap.exists()) return;
 
@@ -133,10 +118,6 @@ export function startPressesWatcher() {
           local.currentSessionCode,
         );
 
-        // resolvePressesToWinner يتحقق داخلياً من:
-        // - أن لا يوجد فائز حالي (أو أن وقته انتهى)
-        // - أن الجلسة ليست مقفلة
-        // - ثم يختار الأسبق في pressedAt
         await resolvePressesToWinner(session);
       } catch (error) {
         console.error("presses watcher error:", error);
@@ -204,7 +185,7 @@ export async function cleanupInactiveSession() {
       local.lastSession = null;
       stopHostHeartbeat();
       stopTickWorker();
-      stopPressesWatcher(); // ✅ إيقاف مراقب الضغطات أيضاً
+      stopPressesWatcher();
       showToast("تم حذف الجلسة غير النشطة");
     }
   } catch (error) {
@@ -267,7 +248,13 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
-          forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
+          resolutionLock: {
+            active: false,
+            roundId: 0,
+            owner: "",
+            createdAt: 0,
+            expiresAt: 0,
+          },
           cooldownTeamId:
             cooldownEnabled && session.winnerTeamId !== null
               ? Number(session.winnerTeamId)
@@ -352,7 +339,6 @@ async function copyTextToClipboard(text) {
     return;
   }
 
-  // Fallback للبيئات غير الـ HTTPS
   const temp = document.createElement("textarea");
   temp.value = text;
   temp.style.position = "fixed";
@@ -377,9 +363,8 @@ export function bindHostEvents() {
         const newCode = randomCode();
         const readyCode = await createOrLoadSession(newCode);
 
-        // ✅ startHostHeartbeat تُستدعى هنا بدلاً من داخل createOrLoadSession
         startHostHeartbeat();
-        startPressesWatcher(); // ✅ مراقبة ضغطات اللاعبين
+        startPressesWatcher();
 
         const url = new URL(window.location.href);
         url.searchParams.set("session", readyCode);

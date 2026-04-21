@@ -5,27 +5,22 @@
  * ✅ إصلاح 1: progressBar — كلاس "expired" يُضاف الآن بشكل صحيح عند انتهاء الوقت
  * ✅ إصلاح 2: تمت إزالة playAudioSafe المكررة — مستوردة من utils.js
  * ✅ إصلاح 3: startUiTicker تحفظ الآن reference للـ interval في local
- * ✅ إصلاح 6: استدعاء clearPlayerRoundStateGuard و resetBuzzLockIfStale في renderSession
- *             لفك القفل تلقائياً ومسح الحالة عند تغيير الجولة
  */
 
 import { els } from "./dom.js";
 import { local, pageType, getServerNow } from "./state.js";
 import { escapeHtml, getPlayerJoinUrl, playAudioSafe } from "./utils.js";
 import {
-  getBuzzBlockReason,
   getCooldownSecondsLeft,
   getPlayersByTeam,
   getSelectedTeam,
   getSortedPresses,
   getWinnerTeam,
-  isMyCooldownActive,
   normalizeSession,
   removeTeam,
   changeTeamPoints,
   updateTeamName,
 } from "./session-service.js";
-import { clearBuzzButtonDomLock, resetBuzzLockIfStale, clearPlayerRoundState as clearPlayerRoundStateGuard } from "./player-controller.js";
 
 // ─────────────────────────────────────────────
 // Countdown Audio Pool
@@ -205,75 +200,6 @@ function syncHostSounds(session, displayTimeRaw = null) {
   }
 
   syncHostSounds._prevSession = cloneSoundSession(session);
-}
-
-// ─────────────────────────────────────────────
-// Player Round State Reset
-// ─────────────────────────────────────────────
-
-function clearPlayerRoundState() {
-  // رفع الـ token يلغي أي finally قديم معلق من handleBuzzInput
-  local.buzzToken = (local.buzzToken || 0) + 1;
-  local.playerBuzzInFlight = false;
-  local.playerAttemptRoundId = null;
-
-  // إعادة ضبط الـ debounce حتى أول ضغطة بعد فتح الجولة لا تتجاهل
-  local.lastPressTriggerAt = 0;
-
-  // ✅ إصلاح: إعادة ضبط وقت البدء حتى لا يُشغّل الـ safety valve خطأً
-  local.buzzStartedAt = 0;
-
-  // إلغاء الـ timer الأمان حتى لا يتدخل بطلب جديد
-  if (local.buzzInflightTimer) {
-    clearTimeout(local.buzzInflightTimer);
-    local.buzzInflightTimer = null;
-  }
-
-  clearBuzzButtonDomLock();
-  console.log("✅ clearPlayerRoundState: buzz lock released");
-}
-
-function resetPlayerBuzzUiState(session) {
-  if (!els.deviceBuzzBtn) return;
-
-  const currentRoundId = Number(session.roundId || 1);
-  const forceUnlockChanged =
-    Number(session.forceUnlockToken || 0) !==
-    Number(local.lastSeenForceUnlockToken || 0);
-
-  if (forceUnlockChanged) {
-    console.log(`resetPlayerBuzzUiState: forceUnlockToken changed, clearing state`);
-    local.lastSeenForceUnlockToken = Number(session.forceUnlockToken || 0);
-    clearPlayerRoundState();
-  }
-
-  if (local.playerUiRoundId !== currentRoundId) {
-    console.log(`resetPlayerBuzzUiState: round changed (${local.playerUiRoundId} → ${currentRoundId}), clearing state`);
-    local.playerUiRoundId = currentRoundId;
-    clearPlayerRoundState();
-  }
-
-  // ✅ إصلاح: كشف انتقال answerExpired أو فتح القفل (فرصة ثانية بنفس الجولة)
-  // عندما ينتهي الوقت وتُفتح الأزرار، الـ roundId لا يتغير
-  // لكن يجب إعادة ضبط حالة اللاعب حتى يتمكن من الضغط مجدداً
-  const currentAnswerExpired = Boolean(session.answerExpired);
-  const currentLocked = Boolean(session.locked);
-
-  // ✅ إصلاح: أي تغيير في answerExpired (بأي اتجاه) يعني تغير حالة الجلسة
-  // سواء false→true (انتهى الوقت) أو true→false (جولة جديدة بنفس roundId)
-  // → نصفّر lastPressTriggerAt حتى لا يبقى الـ debounce معلقاً بعد آخر سبام
-  const answerExpiredChanged = currentAnswerExpired !== local.lastSeenAnswerExpired;
-  const justUnlocked = !currentLocked && local.lastSeenLocked;
-
-  if (answerExpiredChanged || justUnlocked) {
-    console.log(
-      `resetPlayerBuzzUiState: state window changed (answerExpired: ${local.lastSeenAnswerExpired}→${currentAnswerExpired}, locked: ${local.lastSeenLocked}→${currentLocked}), clearing state`
-    );
-    clearPlayerRoundState();
-  }
-
-  local.lastSeenAnswerExpired = currentAnswerExpired;
-  local.lastSeenLocked = currentLocked;
 }
 
 // ─────────────────────────────────────────────
@@ -709,19 +635,6 @@ export function renderSession(session) {
     locallyFinished = leftMs <= 0;
   }
 
-  // ✅ إصلاح: عندما ينتهي وقت الإجابة محلياً قبل أن يُأكّده Firebase
-  // (تبويب المضيف في الخلفية / مخنوق)، نعامل الجلسة كـ answerExpired=true
-  // حتى يُفتح الزر لسائر اللاعبين ولا تبقى الحالة معلقة إلى الأبد.
-  const localTimerExpired =
-    locallyFinished && !session.answerExpired && session.winnerTeamId !== null;
-  const buzzSession = localTimerExpired
-    ? { ...session, answerExpired: true, locked: false }
-    : session;
-
-  // ✅ إصلاح Bug 6 (المستوى 3): تنظيف حالة اللاعب عند تغيير الجولة
-  clearPlayerRoundStateGuard(buzzSession.roundId);
-  resetPlayerBuzzUiState(buzzSession);
-
   if (els.sessionCode) els.sessionCode.textContent = session.code;
   if (els.deviceSessionCode) els.deviceSessionCode.textContent = session.code;
   if (els.miniSessionCode) els.miniSessionCode.textContent = session.code;
@@ -807,59 +720,6 @@ export function renderSession(session) {
     document.activeElement !== els.cooldownSelector
   ) {
     els.cooldownSelector.value = String(session.cooldown ?? 0);
-  }
-
-  // ✅ Safety Valve: لو playerBuzzInFlight=true لفترة أطول من الـ timeout + هامش أمان،
-  // يعني الـ timeout لم يُشغَّل لسبب ما (tab كان في الخلفية مثلاً) — نفك القفل بالقوة
-  // ✅ أيضاً: لو buzzStartedAt=0 وplayerBuzzInFlight=true يعني القفل معلق بدون طلب فعلي
-  if (
-    local.playerBuzzInFlight &&
-    (local.buzzStartedAt === 0 ||
-      Date.now() - local.buzzStartedAt > (2000 + 500))  // BUZZ_INFLIGHT_TIMEOUT_MS + 500ms هامش
-  ) {
-    console.warn("renderSession: stale buzz lock detected — force releasing");
-    local.buzzToken = (local.buzzToken || 0) + 1;
-    local.playerBuzzInFlight = false;
-    local.buzzStartedAt = 0;
-    local.lastPressTriggerAt = 0;
-    if (local.buzzInflightTimer) {
-      clearTimeout(local.buzzInflightTimer);
-      local.buzzInflightTimer = null;
-    }
-    clearBuzzButtonDomLock();
-  }
-
-  if (els.deviceBuzzBtn) {
-    // ✅ إصلاح: استخدام buzzSession (يعكس انتهاء الوقت المحلي) بدلاً من session الخام
-    const playerBlockedReason = getBuzzBlockReason(buzzSession, { strict: true });
-    const localConfirmedAttemptThisRound =
-      Number(local.playerAttemptRoundId) === Number(session.roundId);
-
-    // ✅ إصلاح: حُذف !locallyFinished — buzzSession يتكفل بذلك الآن
-    const enabled =
-      !local.playerBuzzInFlight &&
-      playerBlockedReason === null &&
-      !localConfirmedAttemptThisRound;
-
-    els.deviceBuzzBtn.disabled = !enabled;
-
-    if (!local.playerBuzzInFlight) {
-      els.deviceBuzzBtn.dataset.pending = "0";
-      els.deviceBuzzBtn.classList.remove("is-pending");
-    }
-
-    const amIWinner =
-      session.winnerPlayerId && session.winnerPlayerId === local.deviceId;
-
-    if (amIWinner && !session.answerExpired && !locallyFinished) {
-      els.deviceBuzzBtn.style.background =
-        "linear-gradient(135deg, #22c55e, #16a34a)";
-    } else if (isMyCooldownActive(session)) {
-      els.deviceBuzzBtn.style.background =
-        "linear-gradient(135deg, #64748b, #475569)";
-    } else {
-      els.deviceBuzzBtn.style.background = "";
-    }
   }
 
   if (els.connectionBadge) {

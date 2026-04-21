@@ -29,6 +29,7 @@ import {
   pressesRef,
   normalizeSession,
   resolvePressesToWinner,
+  emptyResolutionLock,
 } from "./session-service.js";
 import { showToast } from "./ui-renderer.js";
 import { createOrLoadSession } from "./session-runtime.js";
@@ -248,13 +249,7 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
-          resolutionLock: {
-            active: false,
-            roundId: 0,
-            owner: "",
-            createdAt: 0,
-            expiresAt: 0,
-          },
+          resolutionLock: emptyResolutionLock(),
           cooldownTeamId:
             cooldownEnabled && session.winnerTeamId !== null
               ? Number(session.winnerTeamId)

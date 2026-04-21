@@ -28,7 +28,37 @@ import {
 import { sanitizeName, getTeamDisplayNameByColor } from "./utils.js";
 import { els } from "./dom.js";
 
+// ─────────────────────────────────────────────
+// Resolution Lock — Constants & Helpers
+// ─────────────────────────────────────────────
+//
+// القفل الذري الذي يضمن حاسم واحد فقط لكل roundId.
+// • TTL قصير (2500ms) = self-healing تلقائي لو crash الـ host
+// • owner فريد لكل محاولة = يمنع release لقفل غيرك
+// • roundId داخل القفل = يعزل القفل بجولته
+//
 const RESOLUTION_LOCK_TTL_MS = 2500;
+
+/**
+ * القيمة الموحّدة للقفل الفارغ.
+ * تُستخدم في كل المواضع التي تصفّر فيها الجولة أو تنتهي،
+ * حتى لا ينفلت literal في مكان فيُسبّب "عَلَق" في القفل.
+ */
+export const EMPTY_RESOLUTION_LOCK = Object.freeze({
+  active: false,
+  roundId: 0,
+  owner: "",
+  createdAt: 0,
+  expiresAt: 0,
+});
+
+/**
+ * يُرجع نسخة قابلة للكتابة — لأن Firebase لا يقبل Frozen objects مباشرة
+ * في بعض الحالات، ولأن الـ consumer قد يدمج حقولاً أخرى.
+ */
+export function emptyResolutionLock() {
+  return { ...EMPTY_RESOLUTION_LOCK };
+}
 
 // ─────────────────────────────────────────────
 // Default Data
@@ -132,6 +162,7 @@ export function normalizeSession(raw, code) {
         ? null
         : Number(raw.cooldownTeamId),
     resolutionLock: {
+      ...emptyResolutionLock(),
       active: Boolean(resolutionLock.active),
       roundId: Number(resolutionLock.roundId || 0),
       owner: String(resolutionLock.owner || ""),
@@ -289,8 +320,25 @@ function buildResolutionLockOwner() {
     .slice(2, 8)}`;
 }
 
+/**
+ * يحاول أخذ قفل الحسم لجولة محددة بشكل ذري.
+ *
+ * قواعد القبول داخل الـ transaction:
+ *  1. القفل غير نشط              → خذه
+ *  2. القفل نشط لكن TTL انتهت    → استولِ عليه (self-heal)
+ *  3. القفل نشط لجولة مختلفة     → استولِ عليه (stale من جولة قديمة)
+ *  4. القفل نشط لنفس الجولة      → abort (resolver آخر يعمل الآن)
+ *
+ * @param {number} roundId الجولة المستهدفة للحسم
+ * @returns {Promise<{ok: boolean, owner: string}>}
+ */
 export async function acquireResolutionLock(roundId) {
   if (!local.currentSessionCode) {
+    return { ok: false, owner: "" };
+  }
+
+  const targetRoundId = Number(roundId || 0);
+  if (!Number.isFinite(targetRoundId) || targetRoundId <= 0) {
     return { ok: false, owner: "" };
   }
 
@@ -298,28 +346,36 @@ export async function acquireResolutionLock(roundId) {
   const now = getServerNow();
   const expiresAt = now + RESOLUTION_LOCK_TTL_MS;
 
-  const result = await runTransaction(
-    resolutionLockRef(local.currentSessionCode),
-    (current) => {
-      const currentActive = Boolean(current?.active);
-      const currentRoundId = Number(current?.roundId || 0);
-      const currentExpiresAt = Number(current?.expiresAt || 0);
-      const currentStillValid = currentActive && currentExpiresAt > now;
+  let result;
+  try {
+    result = await runTransaction(
+      resolutionLockRef(local.currentSessionCode),
+      (current) => {
+        const currentActive = Boolean(current?.active);
+        const currentRoundId = Number(current?.roundId || 0);
+        const currentExpiresAt = Number(current?.expiresAt || 0);
+        const currentStillValid = currentActive && currentExpiresAt > now;
 
-      if (currentStillValid && currentRoundId === Number(roundId)) {
-        return;
-      }
+        // قفل نشط لنفس الجولة ولم تنتهِ TTL → لا تلمسه
+        if (currentStillValid && currentRoundId === targetRoundId) {
+          return; // abort
+        }
 
-      return {
-        active: true,
-        roundId: Number(roundId || 0),
-        owner,
-        createdAt: now,
-        expiresAt,
-      };
-    },
-    { applyLocally: false },
-  );
+        // غير ذلك: خذه (جديد / مستولى من stale / من جولة قديمة)
+        return {
+          active: true,
+          roundId: targetRoundId,
+          owner,
+          createdAt: now,
+          expiresAt,
+        };
+      },
+      { applyLocally: false },
+    );
+  } catch (error) {
+    console.warn("acquireResolutionLock transaction error:", error?.message ?? error);
+    return { ok: false, owner: "" };
+  }
 
   const lockValue = result?.snapshot?.val?.();
 
@@ -327,11 +383,18 @@ export async function acquireResolutionLock(roundId) {
     Boolean(result?.committed) &&
     lockValue &&
     String(lockValue.owner || "") === owner &&
-    Number(lockValue.roundId || 0) === Number(roundId || 0);
+    Number(lockValue.roundId || 0) === targetRoundId;
 
-  return { ok: acquired, owner };
+  return { ok: Boolean(acquired), owner };
 }
 
+/**
+ * يفك القفل بشكل آمن — يتحقق من owner و roundId قبل التصفير.
+ * يضمن أن لا يفك أحد قفل غيره، ويسمح بـ short-circuit لو القفل فعلاً متصفّر.
+ *
+ * @param {string} owner   owner المتوقع (من acquireResolutionLock)
+ * @param {number|null} roundId الجولة المتوقعة
+ */
 export async function releaseResolutionLock(owner = "", roundId = null) {
   if (!local.currentSessionCode) return;
 
@@ -339,40 +402,51 @@ export async function releaseResolutionLock(owner = "", roundId = null) {
     await runTransaction(
       resolutionLockRef(local.currentSessionCode),
       (current) => {
+        // غير موجود → اعتبره متصفراً (idempotent)
         if (!current || typeof current !== "object") {
-          return {
-            active: false,
-            roundId: 0,
-            owner: "",
-            createdAt: 0,
-            expiresAt: 0,
-          };
+          return emptyResolutionLock();
         }
 
+        // فعلاً متصفر؟ لا تلمس (تجنب كتابة شبكية عبثية)
+        if (!current.active && !current.owner) {
+          return; // abort
+        }
+
+        // مالك مختلف؟ ممنوع تفكه
         if (owner && String(current.owner || "") !== String(owner)) {
-          return;
+          return; // abort
         }
 
+        // جولة مختلفة؟ ممنوع تفكه
         if (
           roundId !== null &&
           roundId !== undefined &&
           Number(current.roundId || 0) !== Number(roundId)
         ) {
-          return;
+          return; // abort
         }
 
-        return {
-          active: false,
-          roundId: 0,
-          owner: "",
-          createdAt: 0,
-          expiresAt: 0,
-        };
+        return emptyResolutionLock();
       },
       { applyLocally: false },
     );
   } catch (error) {
     console.warn("releaseResolutionLock error:", error?.message ?? error);
+  }
+}
+
+/**
+ * تصفير غير مشروط للقفل — يُستخدم في حالات إعادة الضبط الكلي
+ * (مثلاً إنهاء الجلسة) حيث لا يهمنا من يملكه.
+ */
+export async function forceReleaseResolutionLock() {
+  if (!local.currentSessionCode) return;
+  try {
+    await update(sessionRef(local.currentSessionCode), {
+      resolutionLock: emptyResolutionLock(),
+    });
+  } catch (error) {
+    console.warn("forceReleaseResolutionLock error:", error?.message ?? error);
   }
 }
 
@@ -424,13 +498,7 @@ export async function ensureSession(code) {
       winnerPressedAt: null,
       roundStartedAt: null,
       roundEndsAt: null,
-      resolutionLock: {
-        active: false,
-        roundId: 0,
-        owner: "",
-        createdAt: 0,
-        expiresAt: 0,
-      },
+      resolutionLock: emptyResolutionLock(),
       teams: defaultTeams(),
       presses: null,
       cooldown: 0,
@@ -476,13 +544,7 @@ export async function ensureSession(code) {
   }
 
   if (!current.resolutionLock || typeof current.resolutionLock !== "object") {
-    patch.resolutionLock = {
-      active: false,
-      roundId: 0,
-      owner: "",
-      createdAt: 0,
-      expiresAt: 0,
-    };
+    patch.resolutionLock = emptyResolutionLock();
   }
 
   if (
@@ -560,13 +622,7 @@ export async function resetToFreshRound(session, extraPatch = {}) {
     roundId: Number(session.roundId || 1) + 1,
     presses: null,
     timeLeft: Number(session.maxTime) || 3,
-    resolutionLock: {
-      active: false,
-      roundId: 0,
-      owner: "",
-      createdAt: 0,
-      expiresAt: 0,
-    },
+    resolutionLock: emptyResolutionLock(),
     ...extraPatch,
     hostUpdatedAt: getServerNow(),
   });
@@ -691,14 +747,22 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 // Resolve Winner — Host-side
 // ─────────────────────────────────────────────
 
+/**
+ * يحسم الجولة: يختار الأسبق ضغطاً ويكتبه كفائز.
+ *
+ * تسلسل الحماية (من الأرخص للأغلى):
+ *  1. فحص حالة الـ session المُمرَّرة (تفادي transaction بلا داعي)
+ *  2. أخذ قفل ذري لـ roundId المحدد
+ *  3. إعادة قراءة الـ session بعد القفل (guards ضد race بين الفحص والقفل)
+ *  4. كتابة الفائز + تصفير القفل inline (atomic) في نفس الـ update
+ *  5. finally: release شرطي (فقط لو لم نُصفّره inline)
+ */
 export async function resolvePressesToWinner(session) {
   if (!local.currentSessionCode) return false;
 
-  if (session.winnerTeamId !== null && !session.answerExpired) {
-    return false;
-  }
-
+  // guards رخيصة قبل أي نداء شبكي
   if (session.locked) return false;
+  if (session.winnerTeamId !== null && !session.answerExpired) return false;
 
   const sortedPresses = getSortedPresses(session);
   if (sortedPresses.length === 0) return false;
@@ -709,31 +773,26 @@ export async function resolvePressesToWinner(session) {
     return false;
   }
 
+  // إذا صفّرنا القفل inline مع كتابة الفائز، نتخطى release في finally.
+  let lockClearedInline = false;
+
   try {
     const freshSession = await readCurrentSession();
 
-    if (Number(freshSession.roundId || 0) !== targetRoundId) {
-      return false;
-    }
-
-    if (freshSession.locked) {
-      return false;
-    }
-
-    if (freshSession.winnerTeamId !== null && !freshSession.answerExpired) {
-      return false;
-    }
+    // الجولة تغيّرت بين القراءة الأولى والقفل → تخلَّ بصمت
+    if (Number(freshSession.roundId || 0) !== targetRoundId) return false;
+    if (freshSession.locked) return false;
+    if (freshSession.winnerTeamId !== null && !freshSession.answerExpired) return false;
 
     const freshPresses = getSortedPresses(freshSession);
-    if (freshPresses.length === 0) {
-      return false;
-    }
+    if (freshPresses.length === 0) return false;
 
     const winnerPress = freshPresses[0];
     const maxTime = Number(freshSession.maxTime || 3);
     const winnerTime = Number(winnerPress.pressedAt);
     const serverNow = getServerNow();
 
+    // كتابة ذرية واحدة: الفائز + تصفير القفل معاً
     await update(sessionRef(local.currentSessionCode), {
       winnerTeamId: Number(winnerPress.teamId),
       winnerPlayerName: String(winnerPress.playerName || ""),
@@ -748,17 +807,13 @@ export async function resolvePressesToWinner(session) {
       cooldownPlayerId: "",
       cooldownTeamId: null,
       cooldownEndsAt: null,
-      resolutionLock: {
-        active: false,
-        roundId: 0,
-        owner: "",
-        createdAt: 0,
-        expiresAt: 0,
-      },
+      resolutionLock: emptyResolutionLock(),
       updatedAt: serverNow,
       hostUpdatedAt: serverNow,
       expiresAt: serverNow + SESSION_EXPIRY_MS,
     });
+
+    lockClearedInline = true;
 
     console.log(
       `resolvePressesToWinner: winner = ${winnerPress.playerName} (team ${winnerPress.teamId}) at ${winnerTime}`,
@@ -769,7 +824,11 @@ export async function resolvePressesToWinner(session) {
     console.warn("resolvePressesToWinner error:", error?.message ?? error);
     return false;
   } finally {
-    await releaseResolutionLock(lock.owner, targetRoundId);
+    // إذا لم نُصفّر inline (فشل في مكان ما) نفك القفل المأخوذ.
+    // مع ذلك TTL سيتكفل بالباقي كـ safety net إذا فشل حتى الـ release.
+    if (!lockClearedInline) {
+      await releaseResolutionLock(lock.owner, targetRoundId);
+    }
   }
 }
 
@@ -894,13 +953,7 @@ export async function removeTeam(teamId) {
     patch.roundId = Number(session.roundId || 1) + 1;
     patch.presses = null;
     patch.timeLeft = session.maxTime || 3;
-    patch.resolutionLock = {
-      active: false,
-      roundId: 0,
-      owner: "",
-      createdAt: 0,
-      expiresAt: 0,
-    };
+    patch.resolutionLock = emptyResolutionLock();
   }
 
   if (Number(session.cooldownTeamId) === Number(teamId)) {

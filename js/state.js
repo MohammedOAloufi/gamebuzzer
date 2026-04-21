@@ -30,6 +30,13 @@ export const PLAYER_HEARTBEAT_MS     = 15000;   // 15 ثانية
 export const HOST_HEARTBEAT_MS       = 20000;   // 20 ثانية
 export const SESSION_EXPIRY_MS       = 600000;  // 10 دقائق
 
+// مدة قصوى لانتظار ردّ claimBuzz قبل كسر الـ in-flight lock محلياً
+export const BUZZ_INFLIGHT_TIMEOUT_MS = 2000;
+// هامش أمان فوق الـ timeout للـ safety valve داخل renderSession
+export const BUZZ_INFLIGHT_SAFETY_MS  = 500;
+// debounce صغير لمنع تسجيل نقرتين متتابعتين بالخطأ
+export const BUZZ_DEBOUNCE_MS         = 80;
+
 // ─────────────────────────────────────────────
 // Page Detection
 // ─────────────────────────────────────────────

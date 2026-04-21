@@ -196,12 +196,15 @@ export function hasMyPressInCurrentRound(session) {
 
 export function getBuzzBlockReason(session, options = {}) {
   const { strict = false } = options;
+  const roundExpired = hasRoundExpired(session);
+  const effectiveLocked = Boolean(session.locked) && !roundExpired;
+  const effectiveAnswerExpired = Boolean(session.answerExpired) || roundExpired;
 
   if (!local.joinedPlayer) return "join_required";
-  if (session.locked) return "round_locked";
+  if (effectiveLocked) return "round_locked";
   if (isMyCooldownActive(session)) return "team_cooldown";
 
-  if (session.winnerTeamId !== null && !session.answerExpired) {
+  if (session.winnerTeamId !== null && !effectiveAnswerExpired) {
     if (session.winnerPlayerId && session.winnerPlayerId !== local.deviceId) {
       return "another_player_won";
     }
@@ -254,6 +257,12 @@ export function getSortedPresses(session) {
       if (a.pressedAt !== b.pressedAt) return a.pressedAt - b.pressedAt;
       return String(a.deviceId).localeCompare(String(b.deviceId));
     });
+}
+
+export function hasRoundExpired(sessionLike) {
+  const roundEndsAt = Number(sessionLike?.roundEndsAt || 0);
+  if (!roundEndsAt) return false;
+  return getServerNow() >= roundEndsAt;
 }
 
 // ─────────────────────────────────────────────
@@ -423,6 +432,7 @@ export async function resetToFreshRound(session, extraPatch = {}) {
     roundId: Number(session.roundId || 1) + 1,
     presses: null,
     timeLeft: Number(session.maxTime) || 3,
+    forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
     ...extraPatch,
     hostUpdatedAt: getServerNow(),
   });
@@ -454,7 +464,6 @@ export async function openAllForPlayers() {
     cooldownEndsAt: null,
     cooldownPlayerId: "",
     cooldownTeamId: null,
-    forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
   });
 }
 
@@ -495,6 +504,9 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
 
     const current = snapshot.val();
     const attemptTime = getServerNow();
+    const roundExpired =
+      Boolean(current?.roundEndsAt) &&
+      attemptTime >= Number(current.roundEndsAt);
 
     // ─── 2. تحقّق من expectedRoundId ───
     const roundId = Number(current.roundId || 1);
@@ -510,14 +522,32 @@ export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
     }
 
     // ─── 3. تحقّق من القفل والفائز الحالي ───
-    const locked = Boolean(current.locked);
-    const answerExpired = Boolean(current.answerExpired);
+    const locked = Boolean(current.locked) && !roundExpired;
+    const answerExpired = Boolean(current.answerExpired) || roundExpired;
     const currentWinner =
       current.winnerTeamId === null || current.winnerTeamId === undefined
         ? null
         : Number(current.winnerTeamId);
 
     if (locked || (currentWinner !== null && !answerExpired)) {
+      return false;
+    }
+
+    // ─── 3.5. self-heal لو الوقت انتهى لكن المشرف لم يحدّث الجلسة بعد ───
+    if (roundExpired && currentWinner !== null) {
+      await update(sessionRef(local.currentSessionCode), {
+        timeLeft: 0,
+        timerRunning: false,
+        answerExpired: true,
+        roundEndsAt: null,
+        roundStartedAt: null,
+        locked: false,
+        forceUnlockToken: Number(current.forceUnlockToken || 0) + 1,
+        presses: null,
+        updatedAt: attemptTime,
+        expiresAt: attemptTime + SESSION_EXPIRY_MS,
+      });
+
       return false;
     }
 
@@ -753,6 +783,7 @@ export async function removeTeam(teamId) {
     patch.roundId = Number(session.roundId || 1) + 1;
     patch.presses = null;
     patch.timeLeft = session.maxTime || 3;
+    patch.forceUnlockToken = Number(session.forceUnlockToken || 0) + 1;
   }
 
   if (Number(session.cooldownTeamId) === Number(teamId)) {

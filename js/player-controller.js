@@ -187,4 +187,6 @@ export function bindPlayerEvents() {
       }
     });
   }
+
+  bindBuzzButtonEvents();
 }

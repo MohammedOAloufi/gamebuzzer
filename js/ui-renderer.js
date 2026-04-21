@@ -722,6 +722,59 @@ export function renderSession(session) {
     els.cooldownSelector.value = String(session.cooldown ?? 0);
   }
 
+  // ✅ Safety Valve: لو playerBuzzInFlight=true لفترة أطول من الـ timeout + هامش أمان،
+  // يعني الـ timeout لم يُشغَّل لسبب ما (tab كان في الخلفية مثلاً) — نفك القفل بالقوة
+  // ✅ أيضاً: لو buzzStartedAt=0 وplayerBuzzInFlight=true يعني القفل معلق بدون طلب فعلي
+  if (
+    local.playerBuzzInFlight &&
+    (local.buzzStartedAt === 0 ||
+      Date.now() - local.buzzStartedAt > (2000 + 500))  // BUZZ_INFLIGHT_TIMEOUT_MS + 500ms هامش
+  ) {
+    console.warn("renderSession: stale buzz lock detected — force releasing");
+    local.buzzToken = (local.buzzToken || 0) + 1;
+    local.playerBuzzInFlight = false;
+    local.buzzStartedAt = 0;
+    local.lastPressTriggerAt = 0;
+    if (local.buzzInflightTimer) {
+      clearTimeout(local.buzzInflightTimer);
+      local.buzzInflightTimer = null;
+    }
+    clearBuzzButtonDomLock();
+  }
+
+  if (els.deviceBuzzBtn) {
+    // ✅ إصلاح: استخدام buzzSession (يعكس انتهاء الوقت المحلي) بدلاً من session الخام
+    const playerBlockedReason = getBuzzBlockReason(buzzSession, { strict: true });
+    const localConfirmedAttemptThisRound =
+      Number(local.playerAttemptRoundId) === Number(session.roundId);
+
+    // ✅ إصلاح: حُذف !locallyFinished — buzzSession يتكفل بذلك الآن
+    const enabled =
+      !local.playerBuzzInFlight &&
+      playerBlockedReason === null &&
+      !localConfirmedAttemptThisRound;
+
+    els.deviceBuzzBtn.disabled = !enabled;
+
+    if (!local.playerBuzzInFlight) {
+      els.deviceBuzzBtn.dataset.pending = "0";
+      els.deviceBuzzBtn.classList.remove("is-pending");
+    }
+
+    const amIWinner =
+      session.winnerPlayerId && session.winnerPlayerId === local.deviceId;
+
+    if (amIWinner && !session.answerExpired && !locallyFinished) {
+      els.deviceBuzzBtn.style.background =
+        "linear-gradient(135deg, #22c55e, #16a34a)";
+    } else if (isMyCooldownActive(session)) {
+      els.deviceBuzzBtn.style.background =
+        "linear-gradient(135deg, #64748b, #475569)";
+    } else {
+      els.deviceBuzzBtn.style.background = "";
+    }
+  }
+
   if (els.connectionBadge) {
     els.connectionBadge.textContent = local.joinedPlayer ? "متصل" : "بانتظار الانضمام";
     els.connectionBadge.className =

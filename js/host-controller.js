@@ -267,6 +267,7 @@ export async function startTickWorker() {
           roundEndsAt: null,
           roundStartedAt: null,
           locked: false,
+          forceUnlockToken: Number(session.forceUnlockToken || 0) + 1,
           cooldownTeamId:
             cooldownEnabled && session.winnerTeamId !== null
               ? Number(session.winnerTeamId)

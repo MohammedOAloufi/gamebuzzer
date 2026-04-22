@@ -36,6 +36,11 @@ export const BUZZ_INFLIGHT_TIMEOUT_MS = 2000;
 export const BUZZ_INFLIGHT_SAFETY_MS  = 500;
 // debounce صغير لمنع تسجيل نقرتين متتابعتين بالخطأ
 export const BUZZ_DEBOUNCE_MS         = 80;
+// ⏱️ Sync Buffer — تأخير بدء العدّاد المرئي بعد pressedAt لضمان وصول
+// الإشارة لكل الأجهزة قبل بدء العدّ. النتيجة: كل الأطراف يبدأون من
+// maxTime وينتهون في نفس اللحظة الخادمية بالضبط.
+// القيمة يجب أن تغطّي RTT الأسوأ المتوقع (عادة 150-300ms في الشبكات العادية).
+export const BUZZ_SYNC_DELAY_MS       = 350;
 
 // ─────────────────────────────────────────────
 // Page Detection
@@ -116,13 +121,6 @@ export const local = {
   // ✅ جديد: توقيت بدء الـ buzz الحالي — يُستخدم كـ safety valve في renderSession
   // لكشف الـ locks التي تجاوزت العمر الطبيعي دون أن ينتهي الـ timeout لسبب ما
   buzzStartedAt: 0,
-
-  // ✅ Provisional Anchor — يُثبّت لحظة البدء المرئية للمؤقت عند كل طرف.
-  //   key    = `${code}:${roundId}:${winnerDeviceId}`
-  //   anchor = serverNow لحظة أول مشاهدة للضغطة على هذا الجهاز
-  // الغرض: يبدأ المؤقت من maxTime فور رؤية الضغطة (لا يُحسب منه RTT الشبكة)،
-  //        ويبقى ثابتاً حتى بعد وصول قيم الخادم الرسمية — بلا قفزات.
-  provisionalAnchor: { key: "", startedAt: 0 },
 };
 
 // ─────────────────────────────────────────────

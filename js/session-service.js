@@ -285,22 +285,13 @@ export function canBuzz(session) {
 export function applyProvisionalWinner(session) {
   if (!session) return session;
 
-  // ملاحظة مهمة: لا نخرج مبكراً عند session.locked — لأن الـ resolver بعد الحسم
-  // يضع locked=true ويكتب roundEndsAt الحقيقي (clickedAt + maxTime). بدون المرور
-  // من هنا سيقفز المؤقت للوراء بمقدار RTT. نستمر ونستخدم anchor المحلي بدلاً من ذلك.
-
   const sorted = getSortedPresses(session);
-  if (sorted.length === 0) {
-    if (local.provisionalAnchor?.key) {
-      local.provisionalAnchor = { key: "", startedAt: 0 };
-    }
-    return session;
-  }
+  if (sorted.length === 0) return session;
 
   const winnerPress = sorted[0];
   const maxTime = Number(session.maxTime || 3);
 
-  // ⚙️ الفائز الرسمي من الخادم: إذا كان مختلفاً عن محسوبنا المحلي، نثق بالخادم.
+  // الفائز الرسمي من الخادم مختلف → نثق بالخادم
   const serverConfirmedDifferent =
     session.winnerTeamId !== null &&
     session.winnerTeamId !== undefined &&
@@ -308,43 +299,27 @@ export function applyProvisionalWinner(session) {
     session.winnerPlayerId &&
     String(session.winnerPlayerId) !== String(winnerPress.deviceId);
 
-  if (serverConfirmedDifferent) {
-    return session;
-  }
+  if (serverConfirmedDifferent) return session;
 
-  // 🎯 Provisional Anchor — نُثبّت لحظة "أول مشاهدة" للضغطة على هذا الجهاز.
-  // اللاعب الضاغط: anchor ≈ clickedAt (provisional يعمل فور النقرة)
-  // المشرف / اللاعبون الآخرون: anchor = لحظة وصول الـ press عبر WebSocket
-  //   = clickedAt + RTT/2 → يبدأ العدّ من maxTime كامل بلا تأثير الشبكة.
-  const anchorKey = `${String(session.code || "")}:${Number(session.roundId || 0)}:${String(winnerPress.deviceId || "")}`;
-
-  let anchorStartedAt =
-    local.provisionalAnchor?.key === anchorKey
-      ? Number(local.provisionalAnchor.startedAt || 0)
-      : 0;
-
-  if (!anchorStartedAt) {
-    // anchor = لحظة أول مشاهدة على هذا الجهاز (server-time).
-    // اللاعب الضاغط: ≈ clickedAt (provisional يعمل فوراً بعد النقرة)
-    // المشرف/الآخرون: ≈ clickedAt + networkRTT/2 → يبدأ من maxTime كامل
-    anchorStartedAt = getServerNow();
-    local.provisionalAnchor = {
-      key: anchorKey,
-      startedAt: anchorStartedAt,
-    };
-  }
+  // 🎯 Anchor مشترك عبر كل الأطراف: pressedAt من الضغطة نفسها.
+  //   - قيمة محفوظة في Firebase، متطابقة لكل مشترك (اللاعب، المشرف، باقي اللاعبين).
+  //   - roundEndsAt = pressedAt + maxTime*1000 → **نفس اللحظة الخادمية** على كل جهاز.
+  //   - اللاعب الضاغط يرى 3.00→0.00 (مدة كاملة).
+  //   - المشرف يرى عدّاداً يبدأ من قيمة أقل بمقدار RTT/2 لكن ينتهي تماماً مع اللاعب.
+  //   هذا هو السلوك الصحيح: "ينتهون معاً" — الحاسم في اللعبة.
+  const pressedAt = Number(winnerPress.pressedAt || getServerNow());
 
   return {
     ...session,
     winnerTeamId: Number(winnerPress.teamId),
     winnerPlayerId: String(winnerPress.deviceId || ""),
     winnerPlayerName: String(winnerPress.playerName || ""),
-    winnerPressedAt: anchorStartedAt,
+    winnerPressedAt: pressedAt,
     locked: true,
     timerRunning: true,
     answerExpired: false,
-    roundStartedAt: anchorStartedAt,
-    roundEndsAt: anchorStartedAt + maxTime * 1000,
+    roundStartedAt: pressedAt,
+    roundEndsAt: pressedAt + maxTime * 1000,
     timeLeft: maxTime,
     _provisional: true,
   };

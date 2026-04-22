@@ -283,13 +283,26 @@ export function canBuzz(session) {
  * @returns {object} نفس الـ session أو نسخة معدَّلة مع فائز مؤقت + علامة `_provisional: true`
  */
 export function applyProvisionalWinner(session) {
-  // لا نلمس الجلسة إذا كان الخادم حسم فعلاً
   if (!session) return session;
-  if (session.winnerTeamId !== null && session.winnerTeamId !== undefined) {
-    return session;
-  }
-  if (session.answerExpired) return session;
+
+  // ⚙️ شروط نشاط الحسم (تطابق تماماً شروط الـ host resolver):
+  //   - توجد ضغطات في الجولة الحالية
+  //   - الجلسة غير مقفلة
+  //   - إما لا فائز، أو وقت الفائز السابق انتهى (answerExpired)
+  //
+  // 🔑 الحالة الحرجة (السبب الذي كان يُبطئ الضغطة الثانية):
+  //   بعد انتهاء وقت الجولة الأولى، الخادم يبقي winnerTeamId من الفائز القديم
+  //   ويضع answerExpired=true. قبل هذا الإصلاح كان هذا يمنع الحسم المؤقت
+  //   ويجعل اللاعب ينتظر rounds-trip الشبكة الكاملة ليبدأ المؤقت الجديد.
+
   if (session.locked) return session;
+
+  const serverHasFreshWinner =
+    session.winnerTeamId !== null &&
+    session.winnerTeamId !== undefined &&
+    !session.answerExpired;
+
+  if (serverHasFreshWinner) return session;
 
   const sorted = getSortedPresses(session);
   if (sorted.length === 0) return session;
@@ -306,6 +319,7 @@ export function applyProvisionalWinner(session) {
     winnerPressedAt: pressedAt,
     locked: true,
     timerRunning: true,
+    answerExpired: false,
     roundStartedAt: pressedAt,
     roundEndsAt: pressedAt + maxTime * 1000,
     timeLeft: maxTime,

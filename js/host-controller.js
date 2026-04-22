@@ -28,10 +28,11 @@ import {
   sessionRef,
   pressesRef,
   normalizeSession,
+  applyProvisionalWinner,
   resolvePressesToWinner,
   emptyResolutionLock,
 } from "./session-service.js";
-import { showToast } from "./ui-renderer.js";
+import { showToast, renderSession } from "./ui-renderer.js";
 import { createOrLoadSession } from "./session-runtime.js";
 
 // ─────────────────────────────────────────────
@@ -107,24 +108,35 @@ export function startPressesWatcher() {
 
   local.unsubscribePresses = onValue(
     pRef,
-    async (snapshot) => {
+    (snapshot) => {
       try {
         if (!snapshot.exists()) return;
 
-        // ⚡ سرعة: نعتمد على local.lastSession (يبقيه session subscription حديثاً)
-        // بدلاً من get() إضافي — يوفّر ~80ms في كل ضغطة.
-        // الـ resolver يُعيد قراءة fresh session داخلياً بعد أخذ القفل للتحقق.
         const pressesData = snapshot.val();
+
+        // ⚡ المسار السريع (≤ 5ms): يُحدّث الـ UI فوراً قبل أي transaction.
+        //   1) ندمج presses الجديدة في local.lastSession (مصدر بيانات الـ ticker).
+        //   2) نُشغّل render فوراً مع provisional winner — المشرف يرى الفائز
+        //      ويبدأ المؤقت قبل أن يبدأ الـ resolver transaction على الخادم.
+        //
+        // ⚠️ ملاحظة أمان: local.lastSession يبقى صالحاً لأن session subscription
+        //   سيُزامنه لاحقاً عند وصول أي update من الخادم. المنطق هنا لا يكتب شيئاً.
         const baseSession = local.lastSession
           ? { ...local.lastSession, presses: pressesData }
           : { presses: pressesData };
 
-        const session = normalizeSession(
-          baseSession,
-          local.currentSessionCode,
-        );
+        local.lastSession = baseSession;
 
-        await resolvePressesToWinner(session);
+        const normalized = normalizeSession(baseSession, local.currentSessionCode);
+        const withProvisional = applyProvisionalWinner(normalized);
+        renderSession(withProvisional);
+
+        // ⚙️ المسار البطيء (بالتوازي): الـ resolver الرسمي يكتب الحسم على الخادم.
+        //   لا ننتظره — فالـ UI سبقه للعرض أعلاه. عند انتهاء الـ resolver، سيبث
+        //   الخادم winner الحقيقي ويتطابق بصرياً مع الـ provisional.
+        resolvePressesToWinner(normalized).catch((error) => {
+          console.error("resolver error:", error);
+        });
       } catch (error) {
         console.error("presses watcher error:", error);
       }

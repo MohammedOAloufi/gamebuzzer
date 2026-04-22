@@ -116,6 +116,13 @@ export const local = {
   // ✅ جديد: توقيت بدء الـ buzz الحالي — يُستخدم كـ safety valve في renderSession
   // لكشف الـ locks التي تجاوزت العمر الطبيعي دون أن ينتهي الـ timeout لسبب ما
   buzzStartedAt: 0,
+
+  // ✅ Provisional Anchor — يُثبّت لحظة البدء المرئية للمؤقت عند كل طرف.
+  //   key    = `${code}:${roundId}:${winnerDeviceId}`
+  //   anchor = serverNow لحظة أول مشاهدة للضغطة على هذا الجهاز
+  // الغرض: يبدأ المؤقت من maxTime فور رؤية الضغطة (لا يُحسب منه RTT الشبكة)،
+  //        ويبقى ثابتاً حتى بعد وصول قيم الخادم الرسمية — بلا قفزات.
+  provisionalAnchor: { key: "", startedAt: 0 },
 };
 
 // ─────────────────────────────────────────────

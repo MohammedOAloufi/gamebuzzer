@@ -285,43 +285,66 @@ export function canBuzz(session) {
 export function applyProvisionalWinner(session) {
   if (!session) return session;
 
-  // ⚙️ شروط نشاط الحسم (تطابق تماماً شروط الـ host resolver):
-  //   - توجد ضغطات في الجولة الحالية
-  //   - الجلسة غير مقفلة
-  //   - إما لا فائز، أو وقت الفائز السابق انتهى (answerExpired)
-  //
-  // 🔑 الحالة الحرجة (السبب الذي كان يُبطئ الضغطة الثانية):
-  //   بعد انتهاء وقت الجولة الأولى، الخادم يبقي winnerTeamId من الفائز القديم
-  //   ويضع answerExpired=true. قبل هذا الإصلاح كان هذا يمنع الحسم المؤقت
-  //   ويجعل اللاعب ينتظر rounds-trip الشبكة الكاملة ليبدأ المؤقت الجديد.
-
-  if (session.locked) return session;
-
-  const serverHasFreshWinner =
-    session.winnerTeamId !== null &&
-    session.winnerTeamId !== undefined &&
-    !session.answerExpired;
-
-  if (serverHasFreshWinner) return session;
+  // ملاحظة مهمة: لا نخرج مبكراً عند session.locked — لأن الـ resolver بعد الحسم
+  // يضع locked=true ويكتب roundEndsAt الحقيقي (clickedAt + maxTime). بدون المرور
+  // من هنا سيقفز المؤقت للوراء بمقدار RTT. نستمر ونستخدم anchor المحلي بدلاً من ذلك.
 
   const sorted = getSortedPresses(session);
-  if (sorted.length === 0) return session;
+  if (sorted.length === 0) {
+    if (local.provisionalAnchor?.key) {
+      local.provisionalAnchor = { key: "", startedAt: 0 };
+    }
+    return session;
+  }
 
   const winnerPress = sorted[0];
   const maxTime = Number(session.maxTime || 3);
-  const pressedAt = Number(winnerPress.pressedAt);
+
+  // ⚙️ الفائز الرسمي من الخادم: إذا كان مختلفاً عن محسوبنا المحلي، نثق بالخادم.
+  const serverConfirmedDifferent =
+    session.winnerTeamId !== null &&
+    session.winnerTeamId !== undefined &&
+    !session.answerExpired &&
+    session.winnerPlayerId &&
+    String(session.winnerPlayerId) !== String(winnerPress.deviceId);
+
+  if (serverConfirmedDifferent) {
+    return session;
+  }
+
+  // 🎯 Provisional Anchor — نُثبّت لحظة "أول مشاهدة" للضغطة على هذا الجهاز.
+  // اللاعب الضاغط: anchor ≈ clickedAt (provisional يعمل فور النقرة)
+  // المشرف / اللاعبون الآخرون: anchor = لحظة وصول الـ press عبر WebSocket
+  //   = clickedAt + RTT/2 → يبدأ العدّ من maxTime كامل بلا تأثير الشبكة.
+  const anchorKey = `${String(session.code || "")}:${Number(session.roundId || 0)}:${String(winnerPress.deviceId || "")}`;
+
+  let anchorStartedAt =
+    local.provisionalAnchor?.key === anchorKey
+      ? Number(local.provisionalAnchor.startedAt || 0)
+      : 0;
+
+  if (!anchorStartedAt) {
+    // anchor = لحظة أول مشاهدة على هذا الجهاز (server-time).
+    // اللاعب الضاغط: ≈ clickedAt (provisional يعمل فوراً بعد النقرة)
+    // المشرف/الآخرون: ≈ clickedAt + networkRTT/2 → يبدأ من maxTime كامل
+    anchorStartedAt = getServerNow();
+    local.provisionalAnchor = {
+      key: anchorKey,
+      startedAt: anchorStartedAt,
+    };
+  }
 
   return {
     ...session,
     winnerTeamId: Number(winnerPress.teamId),
     winnerPlayerId: String(winnerPress.deviceId || ""),
     winnerPlayerName: String(winnerPress.playerName || ""),
-    winnerPressedAt: pressedAt,
+    winnerPressedAt: anchorStartedAt,
     locked: true,
     timerRunning: true,
     answerExpired: false,
-    roundStartedAt: pressedAt,
-    roundEndsAt: pressedAt + maxTime * 1000,
+    roundStartedAt: anchorStartedAt,
+    roundEndsAt: anchorStartedAt + maxTime * 1000,
     timeLeft: maxTime,
     _provisional: true,
   };

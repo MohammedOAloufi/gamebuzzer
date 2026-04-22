@@ -707,78 +707,53 @@ export async function openAllForPlayers() {
 // Claim Buzz — Player-side (new architecture)
 // ─────────────────────────────────────────────
 
-export async function claimBuzz(teamId, playerName = "", expectedRoundId) {
+/**
+ * يُسجّل ضغطة اللاعب في /presses/{deviceId} بكتابة واحدة فقط.
+ *
+ * ⚡ تصميم زمني:
+ *   - pressedAt يُمرَّر صريحاً من لحظة النقر الفعلية (getServerNow() في click handler).
+ *     هذا يضمن أن roundEndsAt = pressedAt + maxTime*1000 يعكس "لحظة الضغط" بدقة
+ *     — لا يتأثر بتأخير الشبكة أو الـ JS execution.
+ *   - لا get() قبل الكتابة. الـ host resolver هو مصدر الحقيقة ويتحقق من كل القيود
+ *     داخل transaction ذرية (locked, winner, cooldown, round mismatch).
+ *   - الفحوص المحلية (canBuzz/getBuzzBlockReason) في click handler تمنع الطلبات
+ *     العبثية قبل الوصول إلى هنا.
+ *
+ * @param {number} teamId
+ * @param {string} playerName
+ * @param {number} expectedRoundId
+ * @param {number} pressedAt   timestamp بالميلي ثانية (server-time)
+ * @returns {Promise<boolean>}
+ */
+export async function claimBuzz(
+  teamId,
+  playerName = "",
+  expectedRoundId,
+  pressedAt,
+) {
   if (!local.currentSessionCode) return false;
 
-  const safePlayerName = sanitizeName(playerName) || "لاعب";
   const teamIdNum = Number(teamId);
-
   if (!Number.isFinite(teamIdNum)) return false;
 
+  const safePressedAt = Number.isFinite(Number(pressedAt))
+    ? Number(pressedAt)
+    : getServerNow();
+  const roundId = Number.isFinite(Number(expectedRoundId))
+    ? Number(expectedRoundId)
+    : 1;
+  const safePlayerName = sanitizeName(playerName) || "لاعب";
+
   try {
-    const snapshot = await get(sessionRef(local.currentSessionCode));
-    if (!snapshot.exists()) return false;
-
-    const current = snapshot.val();
-    const attemptTime = getServerNow();
-
-    const roundId = Number(current.roundId || 1);
-    if (
-      expectedRoundId !== undefined &&
-      Number.isFinite(expectedRoundId) &&
-      roundId !== expectedRoundId
-    ) {
-      console.log(
-        `claimBuzz: round changed (${expectedRoundId} → ${roundId}) — aborting`,
-      );
-      return false;
-    }
-
-    const locked = Boolean(current.locked);
-    const answerExpired = Boolean(current.answerExpired);
-    const currentWinner =
-      current.winnerTeamId === null || current.winnerTeamId === undefined
-        ? null
-        : Number(current.winnerTeamId);
-
-    if (locked || (currentWinner !== null && !answerExpired)) {
-      return false;
-    }
-
-    const cooldownTeamId =
-      current.cooldownTeamId === null || current.cooldownTeamId === undefined
-        ? null
-        : Number(current.cooldownTeamId);
-    const cooldownEndsAt = current.cooldownEndsAt ?? null;
-
-    const myTeamCooldownActive =
-      cooldownTeamId !== null &&
-      cooldownTeamId === teamIdNum &&
-      Boolean(cooldownEndsAt) &&
-      attemptTime < Number(cooldownEndsAt);
-
-    if (myTeamCooldownActive) return false;
-
-    const currentPresses =
-      current.presses && typeof current.presses === "object"
-        ? current.presses
-        : {};
-    const myCurrentPress = currentPresses[local.deviceId];
-    const alreadyPressedThisRound =
-      myCurrentPress &&
-      Number(myCurrentPress.roundId || 0) === Number(roundId);
-
-    if (alreadyPressedThisRound) return false;
-
     await update(sessionRef(local.currentSessionCode), {
       [`presses/${local.deviceId}`]: {
         teamId: teamIdNum,
         playerName: safePlayerName,
-        pressedAt: attemptTime,
+        pressedAt: safePressedAt,
         roundId,
       },
-      updatedAt: attemptTime,
-      expiresAt: attemptTime + SESSION_EXPIRY_MS,
+      updatedAt: safePressedAt,
+      expiresAt: safePressedAt + SESSION_EXPIRY_MS,
     });
 
     return true;

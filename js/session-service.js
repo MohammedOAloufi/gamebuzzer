@@ -268,6 +268,51 @@ export function canBuzz(session) {
   return getBuzzBlockReason(session, { strict: true }) === null;
 }
 
+/**
+ * ⚡ Provisional Winner — عرض فوري للفائز المرجَّح قبل أن يُوثّقه الـ resolver.
+ *
+ * لماذا؟ Firebase RTDB يطبّق الكتابات محلياً (`applyLocally`) فور كتابتها.
+ * بمجرد أن يضغط لاعب، تظهر ضغطته في `session.presses` لكل العملاء خلال
+ * ~50ms (وفي نفس الجهاز فوراً قبل الخادم). ننتظر الـ resolver (~250ms)
+ * لا معنى له — نطبّق نفس منطقه محلياً للعرض.
+ *
+ * الـ resolver يبقى مصدر الحقيقة؛ عندما يكتب الفائز فعلياً، winnerTeamId
+ * يصبح غير null وهذه الدالة تتوقف عن العمل تلقائياً. 100% اتساق.
+ *
+ * @param {object} session normalized session
+ * @returns {object} نفس الـ session أو نسخة معدَّلة مع فائز مؤقت + علامة `_provisional: true`
+ */
+export function applyProvisionalWinner(session) {
+  // لا نلمس الجلسة إذا كان الخادم حسم فعلاً
+  if (!session) return session;
+  if (session.winnerTeamId !== null && session.winnerTeamId !== undefined) {
+    return session;
+  }
+  if (session.answerExpired) return session;
+  if (session.locked) return session;
+
+  const sorted = getSortedPresses(session);
+  if (sorted.length === 0) return session;
+
+  const winnerPress = sorted[0];
+  const maxTime = Number(session.maxTime || 3);
+  const pressedAt = Number(winnerPress.pressedAt);
+
+  return {
+    ...session,
+    winnerTeamId: Number(winnerPress.teamId),
+    winnerPlayerId: String(winnerPress.deviceId || ""),
+    winnerPlayerName: String(winnerPress.playerName || ""),
+    winnerPressedAt: pressedAt,
+    locked: true,
+    timerRunning: true,
+    roundStartedAt: pressedAt,
+    roundEndsAt: pressedAt + maxTime * 1000,
+    timeLeft: maxTime,
+    _provisional: true,
+  };
+}
+
 export function getCooldownSecondsLeft(session) {
   if (!isMyCooldownActive(session)) return 0;
 

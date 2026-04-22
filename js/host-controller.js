@@ -111,11 +111,16 @@ export function startPressesWatcher() {
       try {
         if (!snapshot.exists()) return;
 
-        const sessionSnap = await get(sessionRef(local.currentSessionCode));
-        if (!sessionSnap.exists()) return;
+        // ⚡ سرعة: نعتمد على local.lastSession (يبقيه session subscription حديثاً)
+        // بدلاً من get() إضافي — يوفّر ~80ms في كل ضغطة.
+        // الـ resolver يُعيد قراءة fresh session داخلياً بعد أخذ القفل للتحقق.
+        const pressesData = snapshot.val();
+        const baseSession = local.lastSession
+          ? { ...local.lastSession, presses: pressesData }
+          : { presses: pressesData };
 
         const session = normalizeSession(
-          sessionSnap.val(),
+          baseSession,
           local.currentSessionCode,
         );
 

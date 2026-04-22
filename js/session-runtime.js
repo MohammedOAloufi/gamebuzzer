@@ -12,6 +12,7 @@
 import { local } from "./state.js";
 import { onValue } from "./firebase.js";
 import {
+  applyProvisionalWinner,
   ensureSession,
   normalizeSession,
   sessionRef,
@@ -47,8 +48,14 @@ export async function subscribeToSession(code) {
         return;
       }
 
-      const session = normalizeSession(snapshot.val(), code);
-      local.lastSession = snapshot.val();
+      const raw = snapshot.val();
+      local.lastSession = raw;
+
+      // ⚡ تطبيق الفائز المؤقت قبل العرض — استجابة فورية للضغط
+      // قبل أن يكمل الـ resolver دورته الكاملة على الخادم.
+      const session = applyProvisionalWinner(
+        normalizeSession(raw, code),
+      );
       renderSession(session);
     },
     (error) => {

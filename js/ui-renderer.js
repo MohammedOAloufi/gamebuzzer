@@ -17,6 +17,7 @@ import {
 } from "./state.js";
 import { escapeHtml, getPlayerJoinUrl, playAudioSafe } from "./utils.js";
 import {
+  applyProvisionalWinner,
   getBuzzBlockReason,
   getCooldownSecondsLeft,
   getPlayersByTeam,
@@ -882,10 +883,14 @@ export function startUiTicker() {
   local.uiTicker = setInterval(() => {
     if (!local.lastSession) return;
 
-    const session = normalizeSession(
+    let session = normalizeSession(
       local.lastSession,
       local.currentSessionCode,
     );
+
+    // ⚡ تطبيق الفائز المؤقت محلياً — يبقي المؤقت والفائز ظاهرين
+    // بسرعة فائقة حتى قبل أن يوثّق الخادم الحسم.
+    session = applyProvisionalWinner(session);
 
     // تطبيق انتهاء الـ cooldown محلياً دون انتظار Firebase
     if (

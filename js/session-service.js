@@ -22,6 +22,7 @@ import { db, ref, set, update, get, runTransaction } from "./firebase.js";
 import {
   TEAM_COLORS,
   SESSION_EXPIRY_MS,
+  BUZZ_SYNC_DELAY_MS,
   local,
   getServerNow,
 } from "./state.js";
@@ -301,13 +302,17 @@ export function applyProvisionalWinner(session) {
 
   if (serverConfirmedDifferent) return session;
 
-  // 🎯 Anchor مشترك عبر كل الأطراف: pressedAt من الضغطة نفسها.
-  //   - قيمة محفوظة في Firebase، متطابقة لكل مشترك (اللاعب، المشرف، باقي اللاعبين).
-  //   - roundEndsAt = pressedAt + maxTime*1000 → **نفس اللحظة الخادمية** على كل جهاز.
-  //   - اللاعب الضاغط يرى 3.00→0.00 (مدة كاملة).
-  //   - المشرف يرى عدّاداً يبدأ من قيمة أقل بمقدار RTT/2 لكن ينتهي تماماً مع اللاعب.
-  //   هذا هو السلوك الصحيح: "ينتهون معاً" — الحاسم في اللعبة.
+  // 🎯 Anchor مشترك + Sync Buffer — يبدأون معاً وينتهون معاً:
+  //   pressedAt      = لحظة الضغط (نفس القيمة على كل الأجهزة، مُضمَّنة في الـ press).
+  //   roundStartedAt = pressedAt + BUZZ_SYNC_DELAY_MS (350ms)
+  //   roundEndsAt    = roundStartedAt + maxTime*1000
+  //
+  //   خلال الـ 350ms بعد الضغط، تصل الإشارة لكل الأجهزة (RTT عادي < 300ms).
+  //   الـ UI يعرض maxTime كاملاً حتى serverNow يصل إلى roundStartedAt، ثم يبدأ
+  //   العدّ التنازلي. النتيجة: كل الأطراف يبدأون من 3.00 في نفس اللحظة الخادمية
+  //   وينتهون في نفس اللحظة — مزامنة بصرية كاملة.
   const pressedAt = Number(winnerPress.pressedAt || getServerNow());
+  const roundStartedAt = pressedAt + BUZZ_SYNC_DELAY_MS;
 
   return {
     ...session,
@@ -318,8 +323,8 @@ export function applyProvisionalWinner(session) {
     locked: true,
     timerRunning: true,
     answerExpired: false,
-    roundStartedAt: pressedAt,
-    roundEndsAt: pressedAt + maxTime * 1000,
+    roundStartedAt,
+    roundEndsAt: roundStartedAt + maxTime * 1000,
     timeLeft: maxTime,
     _provisional: true,
   };

@@ -250,6 +250,10 @@ export async function startTickWorker() {
       const serverNow = getServerNow();
       const leftMs = Number(session.roundEndsAt) - serverNow;
 
+      // ⏸️ ما زلنا داخل فترة الـ sync buffer قبل roundStartedAt → لا تُنقص timeLeft بعد.
+      const startedAt = Number(session.roundStartedAt || 0);
+      if (startedAt && serverNow < startedAt) return;
+
       if (leftMs <= 0) {
         const cooldownEnabled = Number(session.cooldown || 0) > 0;
         const roundAudioKey = buildRoundAudioKey(session);

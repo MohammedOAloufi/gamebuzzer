@@ -670,8 +670,16 @@ export function renderSession(session) {
   let locallyFinished = false;
 
   if (session.timerRunning && session.roundEndsAt) {
+    const startedAt = Number(session.roundStartedAt || 0);
+    const maxTime = Number(session.maxTime || 3);
     const leftMs = Number(session.roundEndsAt) - serverNow;
-    displayTimeRaw = Math.max(0, leftMs / 1000);
+    // 🕐 قبل لحظة البدء المتزامنة (sync buffer) → اعرض maxTime كاملاً.
+    // كل الأجهزة تنتقل من "maxTime ثابت" إلى "عدّ تنازلي" في نفس اللحظة الخادمية.
+    if (startedAt && serverNow < startedAt) {
+      displayTimeRaw = maxTime;
+    } else {
+      displayTimeRaw = Math.max(0, leftMs / 1000);
+    }
     showDecimalTime = true;
     locallyFinished = leftMs <= 0;
   }

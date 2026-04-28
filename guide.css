@@ -334,8 +334,8 @@
 
 .gm-card__img-wrap {
   flex-shrink: 0;
-  width: 140px;
-  height: 80px;
+  width: 160px;
+  height: 100px;
   background: #fff;
   border: 1px solid var(--gm-border);
   border-radius: 8px;
@@ -343,14 +343,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
+  padding: 4px;
 }
 .gm-card__img {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  display: block;
 }
 
 .gm-card__body { min-width: 0; flex: 1; }
@@ -465,7 +464,7 @@
 
   /* البطاقة تبقى أفقية لكن الصورة أصغر */
   .gm-card { padding: 10px; gap: 10px; }
-  .gm-card__img-wrap { width: 96px; height: 64px; padding: 4px; }
+  .gm-card__img-wrap { width: 110px; height: 76px; padding: 3px; }
   .gm-card__title { font-size: 13px; }
   .gm-card__desc { font-size: 12px; }
 

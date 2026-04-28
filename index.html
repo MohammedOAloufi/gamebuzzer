@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Game Buzzer | الرئيسية</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="guide.css" />
   </head>
   <body>
+    <button class="help-fab" data-gm-trigger type="button" aria-label="فتح دليل الاستخدام">
+      <span class="help-fab__icon">؟</span>
+      <span class="help-fab__text">كيف يعمل؟</span>
+    </button>
     <div class="container home-container">
       <section class="hero home-hero">
         <div class="hero-inner single-column home-hero-inner">
@@ -54,6 +59,11 @@
                 </button>
               </div>
 
+              <button class="guide-inline-link" data-gm-trigger type="button">
+                <span class="guide-inline-link__icon">؟</span>
+                <span>أول مرة تستخدم الموقع؟ افتح دليل الاستخدام</span>
+              </button>
+
               <div class="top-note home-note top-gap-18">
                 <strong>Developed by Mohammed Aloufi</strong><br />
                 <span class="developer-links">
@@ -88,6 +98,45 @@
         </div>
       </section>
     </div>
+
+    <div class="gm-overlay" id="gmOverlay" role="dialog" aria-modal="true"
+         aria-labelledby="gmTitle" aria-hidden="true">
+      <div class="gm-modal">
+        <header class="gm-header">
+          <div class="gm-header__title-wrap">
+            <span class="gm-header__icon" aria-hidden="true">؟</span>
+            <div class="gm-header__text">
+              <h2 id="gmTitle">دليل استخدام الموقع</h2>
+              <p>شرح مختصر لكل زر في كل شاشة</p>
+            </div>
+          </div>
+          <button class="gm-header__close" data-gm-close type="button" aria-label="إغلاق">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </header>
+        <nav class="gm-tabs" role="tablist" aria-label="شاشات الموقع"></nav>
+        <div class="gm-body"></div>
+        <footer class="gm-footer">
+          <div class="gm-footer__left">
+            <button class="gm-btn gm-btn--primary" data-gm-next type="button">التالي</button>
+            <button class="gm-btn" data-gm-prev type="button" disabled>السابق</button>
+            <label class="gm-checkbox">
+              <input type="checkbox" id="gmDontShow" />
+              <span>لا تُظهر الدليل تلقائياً مرة أخرى</span>
+            </label>
+          </div>
+          <div class="gm-footer__right">
+            <span class="gm-dots" aria-hidden="true"></span>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <script src="guide.js"></script>
     <script type="module" src="js/app.js"></script>
   </body>
 </html>

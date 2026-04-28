@@ -330,7 +330,7 @@ select {
 }
 
 .host-layout-light {
-  align-items: start;
+  align-items: stretch;
 }
 
 .header-row {
@@ -618,7 +618,15 @@ select {
 
 .side-grid {
   display: grid;
+  grid-template-rows: auto 1fr;
   gap: 18px;
+}
+.side-grid > .card {
+  display: flex;
+  flex-direction: column;
+}
+.side-grid > .card > .card-content {
+  flex: 1;
 }
 
 .team-manage-row {

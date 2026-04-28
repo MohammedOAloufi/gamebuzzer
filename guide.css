@@ -61,15 +61,24 @@
   font-size: 13px;
 }
 
-/* نسخة inline داخل التخطيط (بدون floating) */
+/* نسخة inline داخل التخطيط (بدون floating) — أيقونة + نص */
 .help-fab--inline {
   position: static;
   top: auto;
   left: auto;
   z-index: auto;
-  padding: 8px 14px;
+  padding: 6px 12px 6px 6px;
+  height: 32px;
+  border-radius: 999px;
   font-size: 13px;
+  gap: 6px;
   box-shadow: 0 4px 12px -2px rgba(124, 58, 237, 0.4);
+}
+.help-fab--inline .help-fab__icon {
+  width: 22px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 13px;
 }
 
 /* للزاوية داخل بطاقة (مثل player join header) */

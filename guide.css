@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
 
 /* ============================================================
-   GameBuzzer User Guide — Isolated Styles
+   GameBuzzer User Guide — Isolated Styles (Cards version)
    جميع الأنماط معزولة تحت .gm- / .guide- / .help-fab
    ============================================================ */
 
@@ -129,7 +129,7 @@
 
 .gm-modal {
   width: 100%;
-  max-width: 1100px;
+  max-width: 820px;
   max-height: 92vh;
   background: var(--gm-bg);
   border-radius: var(--gm-radius);
@@ -262,156 +262,90 @@
 }
 
 /* ----------------------------------------------------------------
-   الجسم — عمودان
+   جسم المودال
    ---------------------------------------------------------------- */
 .gm-body {
-  display: grid;
-  grid-template-columns: 1.15fr 1fr;
-  gap: 18px;
   padding: 20px;
   overflow-y: auto;
   flex: 1;
 }
 
-.gm-stage {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 10;
+/* ترويسة الشاشة الحالية */
+.gm-screen-header { margin-bottom: 16px; }
+.gm-screen-step {
+  font-size: 13px;
+  color: var(--gm-text-muted);
+  margin-bottom: 4px;
+}
+.gm-screen-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--gm-text);
+  margin: 0 0 4px;
+}
+.gm-screen-desc {
+  font-size: 13px;
+  color: var(--gm-text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* قائمة البطاقات */
+.gm-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.gm-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
   background: var(--gm-soft);
   border: 1px solid var(--gm-border);
   border-radius: 12px;
-  overflow: hidden;
+  transition: border-color 0.15s, background 0.15s;
 }
-.gm-stage__img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-/* الدبوس */
-.gm-pin {
-  position: absolute;
-  width: 28px;
-  height: 28px;
-  margin: -14px 0 0 -14px;
-  border-radius: 50%;
-  background: var(--gm-purple);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.5);
-  cursor: pointer;
-  border: 2px solid #fff;
-  transition: background 0.2s ease, transform 0.2s ease;
-  z-index: 2;
-}
-.gm-pin::before {
-  content: "";
-  position: absolute;
-  inset: -6px;
-  border-radius: 50%;
-  background: var(--gm-purple);
-  opacity: 0.45;
-  z-index: -1;
-  animation: gm-pulse 1.6s ease-out infinite;
-}
-@keyframes gm-pulse {
-  0%   { transform: scale(0.85); opacity: 0.55; }
-  70%  { transform: scale(1.6); opacity: 0; }
-  100% { transform: scale(1.6); opacity: 0; }
-}
-.gm-pin.gm-pin--active {
-  background: var(--gm-red);
-  transform: scale(1.15);
-}
-.gm-pin.gm-pin--active::before {
-  background: var(--gm-red);
-}
-
-/* الإطار حول الزر */
-.gm-ring {
-  position: absolute;
-  border: 2px dashed var(--gm-red);
-  border-radius: 10px;
-  pointer-events: none;
-  display: none;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
-  z-index: 1;
-}
-.gm-ring.gm-ring--active {
-  display: block;
-}
-
-/* عمود الشروحات */
-.gm-info {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.gm-info__title {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--gm-text);
-}
-.gm-info__desc {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: var(--gm-text-muted);
-}
-.gm-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-  max-height: 50vh;
-}
-.gm-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--gm-border);
-  border-radius: 10px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--gm-text);
-  text-align: right;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-}
-.gm-item:hover,
-.gm-item:focus-visible,
-.gm-item.gm-item--active {
-  background: var(--gm-purple-light);
+.gm-card:hover {
   border-color: var(--gm-purple);
-  outline: none;
-  transform: translateX(-2px);
+  background: var(--gm-purple-light);
 }
-.gm-item__num {
-  flex: 0 0 auto;
-  display: inline-flex;
+
+.gm-card__img-wrap {
+  flex-shrink: 0;
+  width: 140px;
+  height: 80px;
+  background: #fff;
+  border: 1px solid var(--gm-border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--gm-purple);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 6px;
 }
-.gm-item__text strong {
-  color: var(--gm-purple-dark);
+.gm-card__img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.gm-card__body { min-width: 0; flex: 1; }
+.gm-card__title {
+  font-size: 14px;
   font-weight: 700;
+  color: var(--gm-text);
+  margin: 0 0 4px;
+}
+.gm-card__desc {
+  font-size: 13px;
+  color: var(--gm-text-muted);
+  margin: 0;
+  line-height: 1.6;
 }
 
 /* ----------------------------------------------------------------
@@ -495,24 +429,41 @@
 }
 
 /* ----------------------------------------------------------------
-   Responsive ≤ 820px
+   Responsive ≤ 640px
    ---------------------------------------------------------------- */
-@media (max-width: 820px) {
-  .gm-body {
-    grid-template-columns: 1fr;
+@media (max-width: 640px) {
+  .gm-modal { max-height: 95vh; }
+  .gm-header { padding: 14px 16px; }
+  .gm-header__icon { width: 36px; height: 36px; font-size: 17px; }
+  .gm-header__text h2 { font-size: 15px; }
+  .gm-header__text p { font-size: 11px; }
+
+  .gm-tabs { padding: 0 12px; }
+  .gm-tab { padding: 12px 10px; font-size: 12px; }
+
+  .gm-body { padding: 14px; }
+  .gm-screen-title { font-size: 18px; }
+
+  /* البطاقة تبقى أفقية لكن الصورة أصغر */
+  .gm-card { padding: 10px; gap: 10px; }
+  .gm-card__img-wrap { width: 96px; height: 64px; padding: 4px; }
+  .gm-card__title { font-size: 13px; }
+  .gm-card__desc { font-size: 12px; }
+
+  .gm-footer {
+    padding: 12px 14px;
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 10px;
   }
-  .gm-list {
-    max-height: none;
+  .gm-footer__left,
+  .gm-footer__right {
+    justify-content: space-between;
+    flex-wrap: wrap;
   }
-  .help-fab__text {
-    display: none;
-  }
-  .help-fab {
-    padding: 10px 12px;
-  }
-  .gm-modal {
-    max-height: 96vh;
-  }
+
+  .help-fab { padding: 8px 12px; font-size: 12px; }
+  .help-fab__text { display: none; }
 }
 
 /* ----------------------------------------------------------------
@@ -521,15 +472,7 @@
 @media (prefers-reduced-motion: reduce) {
   .gm-overlay,
   .gm-modal,
-  .gm-pin::before,
-  .gm-tab,
-  .gm-item,
+  .gm-card,
   .gm-btn,
-  .help-fab,
-  .guide-inline-link,
-  .gm-dot,
-  .gm-pin {
-    animation: none !important;
-    transition: none !important;
-  }
+  .gm-dot { transition: none !important; }
 }

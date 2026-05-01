@@ -118,3 +118,75 @@ export function playAudioSafe(audioEl) {
     console.error("playAudioSafe error:", error);
   }
 }
+
+// ─────────────────────────────────────────────
+// Mobile audio unlock — يفك حظر تشغيل الصوت على الجوال
+// (iOS/Android تطلب user gesture قبل أول تشغيل)
+// ─────────────────────────────────────────────
+
+const _audioUnlockRegistry = new Set();
+let _audioUnlockInstalled = false;
+let _audioUnlocked = false;
+
+/**
+ * يسجّل عنصر صوت لكي يُفك حظره عند أول لمسة من المستخدم.
+ * يمكن استدعاؤه بأمان عدة مرات لنفس العنصر.
+ */
+export function registerAudioForUnlock(audioEl) {
+  if (!audioEl) return;
+  _audioUnlockRegistry.add(audioEl);
+
+  // إذا كان الصوت مفكوكاً بالفعل، فك العنصر الجديد فوراً
+  if (_audioUnlocked) {
+    _primeAudio(audioEl);
+  }
+}
+
+function _primeAudio(audioEl) {
+  try {
+    const wasMuted = audioEl.muted;
+    audioEl.muted = true;
+    const p = audioEl.play();
+    if (p && typeof p.then === "function") {
+      p.then(() => {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+        audioEl.muted = wasMuted;
+      }).catch(() => {
+        audioEl.muted = wasMuted;
+      });
+    } else {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+      audioEl.muted = wasMuted;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+/**
+ * يثبّت listeners عامة على document لفك حظر الصوت
+ * عند أول tap/click/keydown من المستخدم.
+ */
+export function installAudioUnlock() {
+  if (_audioUnlockInstalled || typeof document === "undefined") return;
+  _audioUnlockInstalled = true;
+
+  const unlock = () => {
+    if (_audioUnlocked) return;
+    _audioUnlocked = true;
+
+    _audioUnlockRegistry.forEach((el) => _primeAudio(el));
+
+    document.removeEventListener("pointerdown", unlock, true);
+    document.removeEventListener("touchstart", unlock, true);
+    document.removeEventListener("click", unlock, true);
+    document.removeEventListener("keydown", unlock, true);
+  };
+
+  document.addEventListener("pointerdown", unlock, true);
+  document.addEventListener("touchstart", unlock, true);
+  document.addEventListener("click", unlock, true);
+  document.addEventListener("keydown", unlock, true);
+}

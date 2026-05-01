@@ -15,7 +15,7 @@ import {
   BUZZ_INFLIGHT_TIMEOUT_MS,
   BUZZ_INFLIGHT_SAFETY_MS,
 } from "./state.js";
-import { escapeHtml, getPlayerJoinUrl, playAudioSafe } from "./utils.js";
+import { escapeHtml, getPlayerJoinUrl, playAudioSafe, registerAudioForUnlock } from "./utils.js";
 import {
   applyProvisionalWinner,
   getBuzzBlockReason,
@@ -93,6 +93,7 @@ function ensureCountdownPool(audioEl) {
     tick.volume = audioEl.volume;
     tick.playbackRate = audioEl.playbackRate || 1;
     pool.push(tick);
+    registerAudioForUnlock(tick);
   }
 
   ensureCountdownPool._pool = pool;

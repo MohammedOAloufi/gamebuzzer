@@ -12,7 +12,15 @@
 import { els } from "./dom.js";
 import { pageType, local, getServerNow } from "./state.js";
 import { get } from "./firebase.js";
-import { randomCode, installAudioUnlock, registerAudioForUnlock } from "./utils.js";
+import {
+  randomCode,
+  installAudioUnlock,
+  registerAudioForUnlock,
+  installWebAudioUnlock,
+  preloadAudioBuffer,
+} from "./utils.js";
+
+export const TICK_AUDIO_URL = "media/beeb_.wav";
 import { deleteSessionIfExpired, sessionRef } from "./session-service.js";
 import {
   hideJoinError,
@@ -161,10 +169,14 @@ async function boot() {
 
   // Mobile audio unlock — يتم فك حظر الصوت عند أول لمسة من المستخدم
   installAudioUnlock();
+  installWebAudioUnlock();
   if (pageType === "host") {
     registerAudioForUnlock(els.countdownTickAudio);
     registerAudioForUnlock(els.endTimeAudio);
     registerAudioForUnlock(els.pointAddedAudio);
+    // تحميل صوت العدّ التنازلي مسبقاً كـ AudioBuffer (Web Audio API)
+    // لضمان تشغيل موثوق على iOS/Android كل ثانية
+    preloadAudioBuffer(TICK_AUDIO_URL);
   }
 
   startUiTicker();

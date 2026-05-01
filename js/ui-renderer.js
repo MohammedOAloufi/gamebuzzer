@@ -15,7 +15,9 @@ import {
   BUZZ_INFLIGHT_TIMEOUT_MS,
   BUZZ_INFLIGHT_SAFETY_MS,
 } from "./state.js";
-import { escapeHtml, getPlayerJoinUrl, playAudioSafe } from "./utils.js";
+import { escapeHtml, getPlayerJoinUrl, playAudioSafe, playAudioBuffer } from "./utils.js";
+
+const TICK_AUDIO_URL = "media/beeb_.wav";
 import {
   applyProvisionalWinner,
   getBuzzBlockReason,
@@ -69,16 +71,13 @@ function resetLocalBuzzState() {
 // ─────────────────────────────────────────────
 
 function playCountdownTick(audioEl) {
-  if (!audioEl) return;
-
+  // الحل النهائي: استخدام Web Audio API عبر playAudioBuffer
+  // يضمن تشغيلاً موثوقاً كل ثانية على iOS/Android والمتصفحات
+  // (audioEl يبقى كـ fallback لو فشل تحميل الـ buffer)
   try {
-    audioEl.pause();
-    audioEl.currentTime = 0;
-
-    const playPromise = audioEl.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {});
-    }
+    playAudioBuffer(TICK_AUDIO_URL, {
+      volume: audioEl?.volume ?? 1,
+    });
   } catch (error) {
     console.error("playCountdownTick error:", error);
   }

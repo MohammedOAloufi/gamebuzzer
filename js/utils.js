@@ -190,3 +190,141 @@ export function installAudioUnlock() {
   document.addEventListener("click", unlock, true);
   document.addEventListener("keydown", unlock, true);
 }
+
+// ─────────────────────────────────────────────
+// Web Audio Tick — حل موثوق لـ iOS/Android
+// يستخدم AudioContext + AudioBuffer لتشغيل صوت قصير بدون حدود
+// (هذا أفضل من <audio> لأن iOS يقفل play() بعد فترة على عناصر HTMLAudio)
+// ─────────────────────────────────────────────
+
+let _audioCtx = null;
+const _audioBuffers = new Map(); // url -> AudioBuffer
+const _pendingBuffers = new Map(); // url -> Promise
+
+function _getAudioCtx() {
+  if (_audioCtx) return _audioCtx;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  try {
+    _audioCtx = new Ctx();
+  } catch (_) {
+    return null;
+  }
+  return _audioCtx;
+}
+
+/**
+ * يحمّل ملف صوت إلى AudioBuffer جاهز للتشغيل الفوري
+ */
+export function preloadAudioBuffer(url) {
+  if (!url) return Promise.resolve(null);
+  if (_audioBuffers.has(url)) return Promise.resolve(_audioBuffers.get(url));
+  if (_pendingBuffers.has(url)) return _pendingBuffers.get(url);
+
+  const ctx = _getAudioCtx();
+  if (!ctx) return Promise.resolve(null);
+
+  const promise = fetch(url)
+    .then((res) => res.arrayBuffer())
+    .then(
+      (data) =>
+        new Promise((resolve, reject) => {
+          // الصياغة القديمة لـ decodeAudioData مدعومة على Safari
+          ctx.decodeAudioData(
+            data,
+            (buf) => resolve(buf),
+            (err) => reject(err),
+          );
+        }),
+    )
+    .then((buf) => {
+      _audioBuffers.set(url, buf);
+      _pendingBuffers.delete(url);
+      return buf;
+    })
+    .catch((err) => {
+      console.error("preloadAudioBuffer error:", url, err);
+      _pendingBuffers.delete(url);
+      return null;
+    });
+
+  _pendingBuffers.set(url, promise);
+  return promise;
+}
+
+/**
+ * يشغّل buffer مُحمّل مسبقاً عبر Web Audio API.
+ * موثوق على iOS/Android طالما الـ AudioContext مفكوك.
+ */
+export function playAudioBuffer(url, { volume = 1 } = {}) {
+  const ctx = _getAudioCtx();
+  if (!ctx) return;
+
+  // محاولة استئناف الـ context (iOS يعلّقه أحياناً)
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+
+  const buffer = _audioBuffers.get(url);
+  if (!buffer) {
+    // إذا لم يكن محمّلاً، حمّله ثم شغّل (قد يتأخر مرة واحدة فقط)
+    preloadAudioBuffer(url).then((buf) => {
+      if (buf) playAudioBuffer(url, { volume });
+    });
+    return;
+  }
+
+  try {
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+
+    source.connect(gain).connect(ctx.destination);
+    source.start(0);
+  } catch (err) {
+    console.error("playAudioBuffer error:", err);
+  }
+}
+
+/**
+ * يفك حظر AudioContext من user gesture (iOS/Android)
+ */
+function _unlockAudioContext() {
+  const ctx = _getAudioCtx();
+  if (!ctx) return;
+
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+
+  // تشغيل buffer صامت لإجبار iOS على فتح القناة
+  try {
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+// hook into existing installAudioUnlock listeners
+const _origInstall = installAudioUnlock;
+let _webAudioHooked = false;
+export function installWebAudioUnlock() {
+  if (_webAudioHooked || typeof document === "undefined") return;
+  _webAudioHooked = true;
+
+  const unlock = () => {
+    _unlockAudioContext();
+  };
+
+  // pointerdown/touchstart/click تكفي لفك القناة على iOS/Android
+  document.addEventListener("pointerdown", unlock, true);
+  document.addEventListener("touchstart", unlock, true);
+  document.addEventListener("click", unlock, true);
+  document.addEventListener("keydown", unlock, true);
+}

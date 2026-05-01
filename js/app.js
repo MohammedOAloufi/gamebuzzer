@@ -12,7 +12,7 @@
 import { els } from "./dom.js";
 import { pageType, local, getServerNow } from "./state.js";
 import { get } from "./firebase.js";
-import { randomCode } from "./utils.js";
+import { randomCode, installAudioUnlock, registerAudioForUnlock } from "./utils.js";
 import { deleteSessionIfExpired, sessionRef } from "./session-service.js";
 import {
   hideJoinError,
@@ -158,6 +158,14 @@ async function boot() {
   bindVisibilityEvents();
 
   if (pageType === "home") return;
+
+  // Mobile audio unlock — يتم فك حظر الصوت عند أول لمسة من المستخدم
+  installAudioUnlock();
+  if (pageType === "host") {
+    registerAudioForUnlock(els.countdownTickAudio);
+    registerAudioForUnlock(els.endTimeAudio);
+    registerAudioForUnlock(els.pointAddedAudio);
+  }
 
   startUiTicker();
 

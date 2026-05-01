@@ -15,7 +15,7 @@ import {
   BUZZ_INFLIGHT_TIMEOUT_MS,
   BUZZ_INFLIGHT_SAFETY_MS,
 } from "./state.js";
-import { escapeHtml, getPlayerJoinUrl, playAudioSafe, registerAudioForUnlock } from "./utils.js";
+import { escapeHtml, getPlayerJoinUrl, playAudioSafe } from "./utils.js";
 import {
   applyProvisionalWinner,
   getBuzzBlockReason,
@@ -64,58 +64,18 @@ function resetLocalBuzzState() {
 }
 
 // ─────────────────────────────────────────────
-// Countdown Audio Pool
+// Countdown Tick — يستعمل عنصر <audio> الموجود في DOM مباشرة
+// (نفس طريقة endTimeAudio لضمان عمله على iOS/Android بعد فك الحظر بأول لمسة)
 // ─────────────────────────────────────────────
-
-function ensureCountdownPool(audioEl) {
-  if (!audioEl) return [];
-
-  if (ensureCountdownPool._pool?.length) {
-    return ensureCountdownPool._pool;
-  }
-
-  const src =
-    audioEl.currentSrc ||
-    audioEl.querySelector?.("source")?.src ||
-    audioEl.getAttribute("src") ||
-    "";
-
-  if (!src) {
-    ensureCountdownPool._pool = [audioEl];
-    return ensureCountdownPool._pool;
-  }
-
-  const pool = [];
-
-  for (let i = 0; i < 6; i += 1) {
-    const tick = new Audio(src);
-    tick.preload = "auto";
-    tick.volume = audioEl.volume;
-    tick.playbackRate = audioEl.playbackRate || 1;
-    pool.push(tick);
-    registerAudioForUnlock(tick);
-  }
-
-  ensureCountdownPool._pool = pool;
-  ensureCountdownPool._index = 0;
-  return pool;
-}
 
 function playCountdownTick(audioEl) {
   if (!audioEl) return;
 
   try {
-    const pool = ensureCountdownPool(audioEl);
-    if (!pool.length) return;
+    audioEl.pause();
+    audioEl.currentTime = 0;
 
-    const currentIndex = Number(ensureCountdownPool._index || 0) % pool.length;
-    const tick = pool[currentIndex];
-    ensureCountdownPool._index = (currentIndex + 1) % pool.length;
-
-    tick.pause();
-    tick.currentTime = 0;
-
-    const playPromise = tick.play();
+    const playPromise = audioEl.play();
     if (playPromise && typeof playPromise.catch === "function") {
       playPromise.catch(() => {});
     }
